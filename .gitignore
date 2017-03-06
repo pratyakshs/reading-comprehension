@@ -93,3 +93,15 @@ ENV/
 
 # starter code
 assignment4/
+
+# data, downloads, train, log
+data/*
+download/*
+train/*
+log/*
+
+# plots
+*.pdf
+*.png
+*.jpg
+
