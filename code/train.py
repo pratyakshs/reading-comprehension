@@ -79,7 +79,10 @@ def get_normalized_train_dir(train_dir):
 def main(_):
 
     # Do what you need to load datasets from FLAGS.data_dir
-    dataset = None
+    dataset = [numpy.load(FLAGS.data_dir+'/train.ids.context'),\
+    numpy.load(FLAGS.data_dir+'/train.ids.question'),\
+    numpy.load(FLAGS.data_dir+'/train.span')]
+
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")

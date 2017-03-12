@@ -13,7 +13,7 @@ from tensorflow.python.ops import variable_scope as vs
 from evaluate import exact_match_score, f1_score
 
 logging.basicConfig(level=logging.INFO)
-
+FLAGS = tf.app.flags.FLAGS
 
 def get_optimizer(opt):
     if opt == "adam":
@@ -30,7 +30,7 @@ class Encoder(object):
         self.size = size
         self.vocab_dim = vocab_dim
 
-    def encode(self, inputs, masks, encoder_state_input):
+    def encode(self, inputs, masks=None, encoder_state_input=None):
         """
         In a generalized encode function, you pass in your inputs,
         masks, and an initial
@@ -45,8 +45,11 @@ class Encoder(object):
                  It can be context-level representation, word-level representation,
                  or both.
         """
-
-        return
+        forward = tf.contrib.rnn.GRUCell(self.size)
+        backward = tf.contrib.rnn.GRUCell(self.size)
+        _, state = tf.nn.bidirectional_dynamic_rnn(forward, backward, inputs)
+        state = tf.concat(state, 2)
+        return state
 
 
 class Decoder(object):
@@ -65,8 +68,8 @@ class Decoder(object):
                               decided by how you choose to implement the encoder
         :return:
         """
-
-        return
+        output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.LSTMCell(self.output_size), knowledge_rep)
+        return output
 
 class QASystem(object):
     def __init__(self, encoder, decoder, *args):
@@ -79,26 +82,38 @@ class QASystem(object):
         """
 
         # ==== set up placeholder tokens ========
-
+        self.paragraph = tf.placeholder(tf.float32)
+        self.question = tf.placeholder(tf.float32)
+        self.dropout_placeholder = tf.placeholder(tf.float32)
+        self.
 
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
             self.setup_embeddings()
-            self.setup_system()
+            self.setup_system(encoder, decoder)
             self.setup_loss()
 
         # ==== set up training/updating procedure ====
         pass
 
 
-    def setup_system(self):
+    def setup_system(self, encoder, decoder):
         """
         After your modularized implementation of encoder and decoder
         you should call various functions inside encoder, decoder here
         to assemble your reading comprehension system!
         :return:
         """
-        raise NotImplementedError("Connect all parts of your system here!")
+        h_p = encoder.encode(paragraph)
+        h_q = encoder.encode(question)
+        Wattpq = tf.get_variable("Wattpq", shape=(FLAGS.state_size, \
+            FLAGS.state_size) ,dtype=tf.float32)
+        battpq = tf.get_variable("battpq", shape=(FLAGS.state_size, \
+            ) ,dtype=tf.float32)
+        att = tf.softmax(tf.matmul(Wattpq, tf.reduce_mean(h_q, axis=1, keep_dims=True)) + battpq)
+        first_token = decoder.decode(att * h_p)
+        last_token = decoder.decode(att * h_p)
+        # raise NotImplementedError("Connect all parts of your system here!")
 
 
     def setup_loss(self):
