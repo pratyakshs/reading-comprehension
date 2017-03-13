@@ -7,6 +7,7 @@ import json
 
 import tensorflow as tf
 
+from qa_data import PAD_ID
 from qa_model import Encoder, QASystem, Decoder
 from os.path import join as pjoin
 
@@ -76,12 +77,52 @@ def get_normalized_train_dir(train_dir):
     return global_train_dir
 
 
+def init_dataset(data_dir, val=False):
+    if val:
+        qfile = pjoin(data_dir, 'val.ids.question')
+        cfile = pjoin(data_dir, 'val.ids.context')
+        sfile = pjoin(data_dir, 'val.span')
+    else:
+        qfile = pjoin(data_dir, 'train.ids.question')
+        cfile = pjoin(data_dir, 'train.ids.context')
+        sfile = pjoin(data_dir, 'train.span')
+
+    dataset_dicts = []
+    with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
+        question = [int(word) for word in qf.next().strip().split()]
+        context = [int(word) for word in cf.next().strip().split()]
+        span = [int(word) for word in sf.next().strip().split()]
+
+        # do question padding
+        if len(question) > FLAGS.question_size:
+            question = question[:FLAGS.question_size]
+            q_mask = [True] * FLAGS.question_size
+        else:
+            question = question + [PAD_ID] * (FLAGS.question_size - len(question))
+            q_mask = [True] * len(question) + [False] *  (FLAGS.question_size - len(question))
+
+        # do context padding
+        if len(context) > FLAGS.output_size:
+            context = context[:FLAGS.output_size]
+            c_mask = [True] * FLAGS.output_size
+        else:
+            context = context + [PAD_ID] * (FLAGS.output_size - len(context))
+            c_mask = [True] * len(context) + [False] *  (FLAGS.output_size - len(context))
+        span = sf.next().strip()
+
+        dataset_dicts.append({'question': question,
+                              'questionMask': q_mask,
+                              'context': context,
+                              'contextMask': c_mask,
+                              'span': span})
+    return dataset_dicts
+
+
 def main(_):
 
     # Do what you need to load datasets from FLAGS.data_dir
-    dataset = [numpy.load(FLAGS.data_dir+'/train.ids.context'),\
-    numpy.load(FLAGS.data_dir+'/train.ids.question'),\
-    numpy.load(FLAGS.data_dir+'/train.span')]
+    datasetTrain = initialize_datasets(FLAGS.data_dir, val=False)
+    datasetVal = initialize_datasets(FLAGS.data_dir, val=True)
 
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
@@ -107,9 +148,9 @@ def main(_):
         initialize_model(sess, qa, load_train_dir)
 
         save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-        qa.train(sess, dataset, save_train_dir)
+        qa.train(sess, datasetTrain, save_train_dir)
 
-        qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
+        qa.evaluate_answer(sess, datasetVal, vocab, FLAGS.evaluate, log=True)
 
 if __name__ == "__main__":
     tf.app.run()
