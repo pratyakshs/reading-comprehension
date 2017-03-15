@@ -9,6 +9,7 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.ops import variable_scope as vs
+import re
 
 from evaluate import exact_match_score, f1_score
 
@@ -24,29 +25,82 @@ def get_optimizer(opt):
         assert (False)
     return optfn
 
-
 class Encoder(object):
     def __init__(self, size, vocab_dim):
         self.size = size
         self.vocab_dim = vocab_dim
 
-    def encode(self, inputs, masks=None, encoder_state_input=None):
-        """
-        In a generalized encode function, you pass in your inputs,
-        masks, and an initial
-        hidden state input into this function.
+    class MatchGRUCell(tf.nn.rnn_cell.RNNCell):
+    """Wrapper around our RNN cell implementation that allows us to play
+    nicely with TensorFlow.
+    """
+        def __init__(self, state_size, attention_func, cell):
+            # self.input_size = input_size
+            self._state_size = state_size
+            self.attention_func = attention_func
+            self.GRUcell = cell
 
-        :param inputs: Symbolic representations of your input
-        :param masks: this is to make sure tf.nn.dynamic_rnn doesn't iterate
-                      through masked steps
-        :param encoder_state_input: (Optional) pass this as initial hidden state
-                                    to tf.nn.dynamic_rnn to build conditional representations
-        :return: an encoded representation of your input.
-                 It can be context-level representation, word-level representation,
-                 or both.
-        """
-        forward = tf.contrib.rnn.GRUCell(self.size)
-        backward = tf.contrib.rnn.GRUCell(self.size)
+        @property
+        def state_size(self):
+            return self._state_size
+
+        @property
+        def output_size(self):
+            return self._state_size
+
+        def __call__(self, inputs, state, scope=None):
+            """Updates the state using the previous @state and @inputs.
+            Args:
+                inputs: is the input vector of size [None, self.input_size]
+                state: is the previous state vector of size [None, self.state_size]
+                scope: is the name of the scope to be used when defining the variables inside.
+            Returns:
+                a pair of the output vector and the new state vector.
+            """
+            scope = scope or type(self).__name__
+            attWeight = self.attention_func(inputs, state)
+            inp = tf.concat(2, [state, attWeight])
+            _, new_state = self.GRUCell(inp, state)
+            output = new_state
+            return output, new_state
+
+    def give_attn_func(self, Hq):
+        def attn_func(inputs, state):
+            with tf.variable_scope("attn_func_encode", \
+                initializer=tf.contrib.layers.xavier_initializer(), reuse=True):
+                ### YOUR CODE HERE (~6-10 lines)
+                Wq = tf.get_variable("W_q", (self.size, self.size))
+                Wp = tf.get_variable("W_p", (self.size, self.size))
+                Wm = tf.get_variable("W_m", (self.size, self.size))
+                bp = tf.get_variable("b_p", (self.size,),\
+                 initializer=tf.constant_initializer(0))
+                w = tf.get_variable("w_att", (self.size, ))
+                mid_st = tf.nn.tanh(tf.matmul(Hq,Wq) + tf.matmul(state,Wm)\
+                 + tf.matmul(inputs, Wp) + bp)
+                b = tf.get_variable("b", (1,),\
+                    initializer=tf.constant_initializer(0))
+                return tf.matmul(tf.softmax(tf.matmul(mid_st, w) + b), Hq)
+        with tf.variable_scope("attn_func_encode", \
+            initializer=tf.contrib.layers.xavier_initializer()):
+            ### YOUR CODE HERE (~6-10 lines)
+            Wq = tf.get_variable("W_q", (self.size, self.size))
+            Wp = tf.get_variable("W_p", (self.size, self.size))
+            Wm = tf.get_variable("W_m", (self.size, self.size))
+            bp = tf.get_variable("b_p", (self.size,),\
+             initializer=tf.constant_initializer(0))
+            w = tf.get_variable("w_att", (self.size, ))
+            b = tf.get_variable("b", (1,),\
+                    initializer=tf.constant_initializer(0))
+        return attn_func
+
+    def encode(self, paragraph, question, masks=None, encoder_state_input=None):
+        _, para_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), paragraph)
+        _, q_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), question)
+        attn_func = self.give_attn_func(q_stat)
+        forward = \
+        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
+        backward = \
+        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
         _, state = tf.nn.bidirectional_dynamic_rnn(forward, backward, inputs)
         state = tf.concat(state, 2)
         return state
@@ -68,11 +122,13 @@ class Decoder(object):
                               decided by how you choose to implement the encoder
         :return:
         """
-        output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.LSTMCell(self.output_size), knowledge_rep)
-        return output
+        forward = tf.contrib.rnn.LSTMCell(self.output_size)
+        backward = tf.contrib.rnn.LSTMCell(self.output_size)
+        output, _ = tf.nn.bidirectional_dynamic_rnn(forward, backward, knowledge_rep)
+        return tf.split(output, 2, axis=2)
 
 class QASystem(object):
-    def __init__(self, encoder, decoder, *args):
+    def __init__(self, encoder, decoder, embed_path, *args):
         """
         Initializes your System
 
@@ -80,21 +136,30 @@ class QASystem(object):
         :param decoder: a decoder that you constructed in train.py
         :param args: pass in more arguments as needed
         """
+        #==========Config Variables========#
+        self.lr = 0.001
+        self.max_para = 100
+        self.max_ques = 10
 
         # ==== set up placeholder tokens ========
         self.paragraph = tf.placeholder(tf.float32)
         self.question = tf.placeholder(tf.float32)
-        self.dropout_placeholder = tf.placeholder(tf.float32)
-        self.
+        # self.dropout_placeholder = tf.placeholder(tf.float32)
+        self.pretrained_embeddings = np.load(embed_path)
+        self.label_start_placeholder = tf.placeholder(tf.float32)
+        self.label_end_placeholder = tf.placeholder(tf.float32)
+        self.vocab_dim = encoder.vocab_dim
 
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
             self.setup_embeddings()
             self.setup_system(encoder, decoder)
-            self.setup_loss()
+            self.loss = self.setup_loss()
 
         # ==== set up training/updating procedure ====
-        pass
+        # pass
+        t_opt=tf.train.AdamOptimizer(learning_rate=self.lr)
+        self.train_op=t_opt.minimize(loss)
 
 
     def setup_system(self, encoder, decoder):
@@ -104,15 +169,8 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        h_p = encoder.encode(paragraph)
-        h_q = encoder.encode(question)
-        Wattpq = tf.get_variable("Wattpq", shape=(FLAGS.state_size, \
-            FLAGS.state_size) ,dtype=tf.float32)
-        battpq = tf.get_variable("battpq", shape=(FLAGS.state_size, \
-            ) ,dtype=tf.float32)
-        att = tf.softmax(tf.matmul(Wattpq, tf.reduce_mean(h_q, axis=1, keep_dims=True)) + battpq)
-        first_token = decoder.decode(att * h_p)
-        last_token = decoder.decode(att * h_p)
+        knowledge_rep = encoder.encode(self.para_embeddingsm self.ques_embeddings)
+        self.start_token_score, self.end_token_score = decoder.decode(knowledge_rep)
         # raise NotImplementedError("Connect all parts of your system here!")
 
 
@@ -122,7 +180,14 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            pass
+            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score))
+            loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score))
+            return loss
+            # temp1s = tf.multiply(tf.exp(self.start_token_soft), self.mask_placeholder)
+            # temp2 = tf.multiply(tf.exp(self.end_token_soft), self.mask_placeholder)
+            # loss = tf.reduce_sum(tf.multiply(tf.label_start_placeholder,temp1))/tf.reduce_sum(temp1)
+            # loss += tf.reduce_sum(tf.multiply(tf.label_end_placeholder,temp2))/tf.reduce_sum(temp2)
+            # pass
 
     def setup_embeddings(self):
         """
@@ -130,20 +195,29 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("embeddings"):
-            pass
+            para_embedding_list = tf.Variable(self.pretrained_embeddings)
+            para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
+            self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
+            ques_embedding_list = tf.Variable(self.pretrained_embeddings)
+            ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
+            self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
+            # pass
 
-    def optimize(self, session, train_x, train_y):
+    def optimize(self, session, question, paragraph, start, end):
         """
         Takes in actual data to optimize your model
         This method is equivalent to a step() function
         :return:
         """
-        input_feed = {}
+        input_feed = {self.paragraph:paragraph,
+        self.question:question,
+        self.label_start_placeholder:start,
+        self.label_end_placeholder:end}
 
         # fill in this feed_dictionary like:
         # input_feed['train_x'] = train_x
 
-        output_feed = []
+        output_feed = [self.train_op, self.loss]
 
         outputs = session.run(output_feed, input_feed)
 
@@ -166,26 +240,28 @@ class QASystem(object):
 
         return outputs
 
-    def decode(self, session, test_x):
+    def decode(self, session, paragraph, question):
         """
         Returns the probability distribution over different positions in the paragraph
         so that other methods like self.answer() will be able to work properly
         :return:
         """
-        input_feed = {}
+        input_feed = {self.paragraph:paragraph,
+        self.question:question}
+
 
         # fill in this feed_dictionary like:
         # input_feed['test_x'] = test_x
 
-        output_feed = []
+        output_feed = [self.start_token_score, self.end_token_score]
 
         outputs = session.run(output_feed, input_feed)
 
         return outputs
 
-    def answer(self, session, test_x):
+    def answer(self, session, paragraph, question):
 
-        yp, yp2 = self.decode(session, test_x)
+        yp, yp2 = self.decode(session, paragraph, question)
 
         a_s = np.argmax(yp, axis=1)
         a_e = np.argmax(yp2, axis=1)
@@ -228,9 +304,12 @@ class QASystem(object):
         :return:
         """
 
+
         f1 = 0.
         em = 0.
-
+        for itr in np.random.randint(len(dataset.shape[0]), size=sample):
+            test_x, test_y = dataset[i]
+            answer(session, paragraph, question)
         if log:
             logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
