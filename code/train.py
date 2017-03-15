@@ -125,11 +125,11 @@ def main(_):
     # Do what you need to load datasets from FLAGS.data_dir
     datasetTrain = init_dataset(FLAGS.data_dir, val=False)
     datasetVal = init_dataset(FLAGS.data_dir, val=True)
-    print(datasetTrain)
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
     vocab, rev_vocab = initialize_vocab(vocab_path)
+    # print(vocab)
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
@@ -151,8 +151,8 @@ def main(_):
 
         save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
         qa.train(sess, datasetTrain, save_train_dir)
-
-        qa.evaluate_answer(sess, datasetVal, vocab, FLAGS.evaluate, log=True)
+        #FLAGS.evaluate,
+        qa.evaluate_answer(sess, datasetVal, rev_vocab, log=True)
 
 if __name__ == "__main__":
     tf.app.run()

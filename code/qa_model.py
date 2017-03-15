@@ -11,7 +11,7 @@ import tensorflow as tf
 from tensorflow.python.ops import variable_scope as vs
 import re
 
-from evaluate import exact_match_score, f1_score
+from evaluate import exact_match_score, f1_score, metric_max_over_ground_truths
 
 logging.basicConfig(level=logging.INFO)
 FLAGS = tf.app.flags.FLAGS
@@ -259,12 +259,13 @@ class QASystem(object):
 
         return outputs
 
-    def answer(self, session, paragraph, question):
-
+    def answer(self, session, item):
+        paragraph= item['context']
+        question = item['question']
         yp, yp2 = self.decode(session, paragraph, question)
 
-        a_s = np.argmax(yp, axis=1)
-        a_e = np.argmax(yp2, axis=1)
+        a_s = np.argmax(yp[item['context_mask']], axis=1)
+        a_e = np.argmax(yp2[item['context_mask']], axis=1)
 
         return (a_s, a_e)
 
@@ -288,7 +289,7 @@ class QASystem(object):
 
         return valid_cost
 
-    def evaluate_answer(self, session, dataset, sample=100, log=False):
+    def evaluate_answer(self, session, dataset, vocab, sample=100, log=True):
         """
         Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
         with the set of true answer labels
@@ -304,12 +305,15 @@ class QASystem(object):
         :return:
         """
 
-
         f1 = 0.
         em = 0.
         for itr in np.random.randint(len(dataset.shape[0]), size=sample):
-            test_x, test_y = dataset[i]
-            a = answer(session, paragraph, question)
+            item = dataset[i]
+            start, end = answer(session, item)
+            ans = ' '.join([vocab[x] for x in item['context'][start:end+1] if x in vocab])
+            check = [' '.join([vocab[x] for x in lst]) for lst in item['span']]
+            f1 += metric_max_over_ground_truths(f1_score, ans, check)
+            em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
             logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
