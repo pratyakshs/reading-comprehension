@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped o
 tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 10, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
+tf.app.flags.DEFINE_integer("output_size", 2, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
 tf.app.flags.DEFINE_string("train_dir", "train", "Training directory to save the model parameters (default: ./train).")
@@ -32,6 +32,8 @@ tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per pri
 tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicates keep all.")
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
+tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
+tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -102,12 +104,12 @@ def init_dataset(data_dir, val=False):
             q_mask = [True] * len(question) + [False] *  (FLAGS.question_size - len(question))
 
         # do context padding
-        if len(context) > FLAGS.output_size:
-            context = context[:FLAGS.output_size]
-            c_mask = [True] * FLAGS.output_size
+        if len(context) > FLAGS.para_size:
+            context = context[:FLAGS.para_size]
+            c_mask = [True] * FLAGS.para_size
         else:
-            context = context + [PAD_ID] * (FLAGS.output_size - len(context))
-            c_mask = [True] * len(context) + [False] *  (FLAGS.output_size - len(context))
+            context = context + [PAD_ID] * (FLAGS.para_size - len(context))
+            c_mask = [True] * len(context) + [False] *  (FLAGS.para_size - len(context))
         span = sf.next().strip()
 
         dataset_dicts.append({'question': question,
@@ -121,9 +123,9 @@ def init_dataset(data_dir, val=False):
 def main(_):
 
     # Do what you need to load datasets from FLAGS.data_dir
-    datasetTrain = initialize_datasets(FLAGS.data_dir, val=False)
-    datasetVal = initialize_datasets(FLAGS.data_dir, val=True)
-
+    datasetTrain = init_dataset(FLAGS.data_dir, val=False)
+    datasetVal = init_dataset(FLAGS.data_dir, val=True)
+    print(datasetTrain)
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")

@@ -31,9 +31,9 @@ class Encoder(object):
         self.vocab_dim = vocab_dim
 
     class MatchGRUCell(tf.nn.rnn_cell.RNNCell):
-    """Wrapper around our RNN cell implementation that allows us to play
-    nicely with TensorFlow.
-    """
+        """Wrapper around our RNN cell implementation that allows us to play
+        nicely with TensorFlow.
+        """
         def __init__(self, state_size, attention_func, cell):
             # self.input_size = input_size
             self._state_size = state_size
@@ -169,7 +169,7 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        knowledge_rep = encoder.encode(self.para_embeddingsm self.ques_embeddings)
+        knowledge_rep = encoder.encode(self.para_embeddings, self.ques_embeddings)
         self.start_token_score, self.end_token_score = decoder.decode(knowledge_rep)
         # raise NotImplementedError("Connect all parts of your system here!")
 
@@ -309,7 +309,7 @@ class QASystem(object):
         em = 0.
         for itr in np.random.randint(len(dataset.shape[0]), size=sample):
             test_x, test_y = dataset[i]
-            answer(session, paragraph, question)
+            a = answer(session, paragraph, question)
         if log:
             logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
