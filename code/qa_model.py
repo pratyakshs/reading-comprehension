@@ -29,9 +29,15 @@ class Encoder(object):
     def __init__(self, size, vocab_dim):
         self.size = size
         self.vocab_dim = vocab_dim
-        self.initial_encoder = tf.nn.rnn_cell.GRUCell(self.size)
-        self.match_encoder_f = tf.nn.rnn_cell.GRUCell(self.size)
-        self.match_encoder_b = tf.nn.rnn_cell.GRUCell(self.size)
+
+        with tf.variable_scope('p_enc'):
+            self.initial_p_encoder = tf.nn.rnn_cell.GRUCell(self.size)
+        with tf.variable_scope('q_enc'):
+            self.initial_q_encoder = tf.nn.rnn_cell.GRUCell(self.size)
+        with tf.variable_scope('mf_enc'):
+            self.match_encoder_f = tf.nn.rnn_cell.GRUCell(self.size)
+        with tf.variable_scope('mb_enc'):
+            self.match_encoder_b = tf.nn.rnn_cell.GRUCell(self.size)
 
     class MatchGRUCell(tf.nn.rnn_cell.RNNCell):
         """Wrapper around our RNN cell implementation that allows us to play
@@ -97,8 +103,8 @@ class Encoder(object):
         return attn_func
 
     def encode(self, paragraph, question, masks=None, encoder_state_input=None):
-        _, para_stat = tf.nn.dynamic_rnn(self.initial_encoder, paragraph, dtype=tf.float32)
-        _, q_stat = tf.nn.dynamic_rnn(self.initial_encoder, question, dtype=tf.float32)
+        _, para_stat = tf.nn.dynamic_rnn(self.initial_p_encoder, paragraph, dtype=tf.float32)
+        _, q_stat = tf.nn.dynamic_rnn(self.initial_q_encoder, question, dtype=tf.float32)
         attn_func = self.give_attn_func(q_stat)
         forward = \
         self.MatchGRUCell(self.size, attn_func, self.match_encoder_f)
@@ -331,6 +337,23 @@ class QASystem(object):
             logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
         return f1, em
+
+    def load(self, checkpoint_dir):
+        print(" [*] Reading checkpoints...")
+
+        model_name = "match_lstm.model-epoch"
+        model_dir = "squad_%s" % (self.batch_size)
+        checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
+
+        ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False
 
     def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
         """
