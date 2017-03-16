@@ -112,7 +112,6 @@ def init_dataset(data_dir, val=False):
         else:
             context = context + [PAD_ID] * (FLAGS.para_size - len(context))
             c_mask = [True] * len(context) + [False] *  (FLAGS.para_size - len(context))
-        span = sf.next().strip()
 
 
         dataset_dicts['question'].append(question)
