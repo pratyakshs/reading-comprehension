@@ -140,10 +140,11 @@ class QASystem(object):
         self.lr = 0.001
         self.max_para = 100
         self.max_ques = 10
+        self.batch_size = 1
 
         # ==== set up placeholder tokens ========
-        self.paragraph = tf.placeholder(tf.float32)
-        self.question = tf.placeholder(tf.float32)
+        self.paragraph = tf.placeholder(tf.int32)
+        self.question = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
         self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
         self.label_start_placeholder = tf.placeholder(tf.float32)
@@ -158,9 +159,11 @@ class QASystem(object):
 
         # ==== set up training/updating procedure ====
         # pass
-        t_opt=tf.train.AdamOptimizer(learning_rate=self.lr)
-        self.train_op=t_opt.minimize(loss)
-
+        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
+        global_step = tf.Variable(0, trainable=False)
+        t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
+        self.train_op = t_opt.minimize(loss, global_step=global_step)
+        
 
     def setup_system(self, encoder, decoder):
         """
@@ -180,9 +183,11 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score))
-            loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score))
-            return loss
+            loss1 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score)
+            loss2 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score)
+            loss1 = tf.multiply(loss1, tf.to_float(self.mask_placeholder))
+            loss2 = tf.multiply(loss2, tf.to_float(self.mask_placeholder))
+            return tf.reduce_sum(loss1 + loss2)
             # temp1s = tf.multiply(tf.exp(self.start_token_soft), self.mask_placeholder)
             # temp2 = tf.multiply(tf.exp(self.end_token_soft), self.mask_placeholder)
             # loss = tf.reduce_sum(tf.multiply(tf.label_start_placeholder,temp1))/tf.reduce_sum(temp1)
@@ -223,18 +228,23 @@ class QASystem(object):
 
         return outputs
 
-    def test(self, session, valid_x, valid_y):
+    def test(self, session, item):
         """
         in here you should compute a cost for your validation set
         and tune your hyperparameters according to the validation set performance
         :return:
         """
-        input_feed = {}
-
+        paragraph= item['context']
+        question = item['question']
+        input_feed = {self.paragraph:paragraph,
+        self.question:question,
+        self.label_start_placeholder:start,
+        self.label_end_placeholder:end}
+        yp, yp2 = self.decode(session, paragraph, question)
         # fill in this feed_dictionary like:
         # input_feed['valid_x'] = valid_x
 
-        output_feed = []
+        output_feed = [self.loss]
 
         outputs = session.run(output_feed, input_feed)
 
@@ -283,8 +293,8 @@ class QASystem(object):
         """
         valid_cost = 0
 
-        for valid_x, valid_y in valid_dataset:
-          valid_cost = self.test(sess, valid_x, valid_y)
+        for item in valid_dataset:
+          valid_cost += self.test(sess, valid_x, valid_y)
 
 
         return valid_cost
@@ -319,7 +329,7 @@ class QASystem(object):
 
         return f1, em
 
-    def train(self, session, dataset, train_dir):
+    def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
         """
         Implement main training loop
 
@@ -348,9 +358,29 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
-
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+
+        i = 0
+        for itr in range(100):
+            for item in dataset:
+                loss_out = self.optimize(session, question, paragraph, start, end)
+                i += 1
+                if i % 1000:
+                    print("[Sample] loss_out: %.8f " % (loss_out))
+                    f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
+
+            self.checkpoint_dir = "match_lstm"
+            model_name = "match_lstm.model-epoch"
+            model_dir = "squad_%s" % (self.batch_size)
+            checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
+
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+
+            self.saver.save(self.sess,
+                           os.path.join(checkpoint_dir, model_name),
+                           global_step=itr)
