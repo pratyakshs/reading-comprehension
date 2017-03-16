@@ -93,32 +93,33 @@ def init_dataset(data_dir, val=False):
                      'contextMask': [], 'span': []}
 
     with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
-        question = [int(word) for word in qf.next().strip().split()]
-        context = [int(word) for word in cf.next().strip().split()]
-        span = [int(word) for word in sf.next().strip().split()]
+        for line in qf:
+            question = [int(word) for word in line.strip().split()]
+            context = [int(word) for word in cf.next().strip().split()]
+            span = [int(word) for word in sf.next().strip().split()]
 
-        # do question padding
-        if len(question) > FLAGS.question_size:
-            question = question[:FLAGS.question_size]
-            q_mask = [True] * FLAGS.question_size
-        else:
-            question = question + [PAD_ID] * (FLAGS.question_size - len(question))
-            q_mask = [True] * len(question) + [False] *  (FLAGS.question_size - len(question))
+            # do question padding
+            if len(question) > FLAGS.question_size:
+                question = question[:FLAGS.question_size]
+                q_mask = [True] * FLAGS.question_size
+            else:
+                question = question + [PAD_ID] * (FLAGS.question_size - len(question))
+                q_mask = [True] * len(question) + [False] *  (FLAGS.question_size - len(question))
 
-        # do context padding
-        if len(context) > FLAGS.para_size:
-            context = context[:FLAGS.para_size]
-            c_mask = [True] * FLAGS.para_size
-        else:
-            context = context + [PAD_ID] * (FLAGS.para_size - len(context))
-            c_mask = [True] * len(context) + [False] *  (FLAGS.para_size - len(context))
+            # do context padding
+            if len(context) > FLAGS.para_size:
+                context = context[:FLAGS.para_size]
+                c_mask = [True] * FLAGS.para_size
+            else:
+                context = context + [PAD_ID] * (FLAGS.para_size - len(context))
+                c_mask = [True] * len(context) + [False] *  (FLAGS.para_size - len(context))
 
 
-        dataset_dicts['question'].append(question)
-        dataset_dicts['questionMask'].append(q_mask)
-        dataset_dicts['context'].append(context)
-        dataset_dicts['contextMask'].append(c_mask)
-        dataset_dicts['span'].append(span)
+            dataset_dicts['question'].append(question)
+            dataset_dicts['questionMask'].append(q_mask)
+            dataset_dicts['context'].append(context)
+            dataset_dicts['contextMask'].append(c_mask)
+            dataset_dicts['span'].append(span)
 
     return dataset_dicts
 
