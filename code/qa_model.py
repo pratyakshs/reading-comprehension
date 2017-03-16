@@ -521,10 +521,23 @@ class QASystem(object):
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
+        print(type(dataset))
+        question = np.array(dataset['question']).reshape(FLAGS.question_size)
+        questionMask = dataset['questionMask']
+        context = np.array(dataset['context']).reshape(FLAGS.para_size)
+        contextMask = dataset['contextMask']
+        span = np.array(dataset['span']).reshape(2, 1)
+        print('question.size', np.array(question).size)
+        print('context.size', np.array(context).size)
+        print('span.size', np.array(span).size)
         i = 0
         for itr in range(100):
-            for item in dataset:
-                loss_out = self.optimize(session, question, paragraph, start, end)
+            for j in range(len(question)):
+                print('iter,', itr, 'j=', j)
+                print('question[i]', question[i])
+                print('context[i]', context[i])
+                print('span[i]', span[i])
+                loss_out = self.optimize(session, question[i], context[i], span[i][0], span[i][1])
                 i += 1
                 if i % 1000:
                     print("[Sample] loss_out: %.8f " % (loss_out))
