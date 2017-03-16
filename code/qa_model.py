@@ -99,6 +99,8 @@ class Encoder(object):
             fn = lambda x: tf.concat(
                 0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
             para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32)
+            r, s, t = para_encoding.get_shape()
+            tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, self.size])
 
         with tf.variable_scope('question_encoder'):
             ques, _ = tf.nn.dynamic_rnn(lstm_enc, question, dtype=tf.float32)
@@ -108,6 +110,8 @@ class Encoder(object):
             ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32)
             ques_encoding = tf.tanh(batch_linear(ques_encoding, FLAGS.question_size+1, True))
             ques_variation = tf.transpose(ques_encoding, perm=[0, 2, 1])
+            r, s, t = ques_variation.get_shape()
+            tf.assert_equal([s.value, t.value], [FLAGS.question_size+1, self.size])
 
         with tf.variable_scope('coattention'):
             # compute affinity matrix, (batch_size, context+1, question+1)
@@ -125,6 +129,8 @@ class Encoder(object):
             c_d = tf.batch_matmul(c_q_emb, a_c, adj_y=True)
             # final coattention context, (batch_size, context+1, 3*hidden_size)
             co_att = tf.concat(2, [para_encoding, tf.transpose(c_d, perm=[0, 2, 1])])
+            r, s, t = co_att.get_shape()
+            tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, 3*self.size])
 
 
         with tf.variable_scope('encoder'):
@@ -137,7 +143,8 @@ class Encoder(object):
                 sequence_length=tf.to_int64([FLAGS.para_size]*FLAGS.batch_size),
                 dtype=tf.float32)
             self._u = tf.concat(2, u)
-
+            r, s, t = self._u.get_shape()
+            tf.assert_equal([s.value, t.value], [2*self.size, FLAGS.para_size])
         return self._u
 
 
@@ -150,9 +157,6 @@ class Decoder(object):
         u_idx = tf.gather(u, idx)
         pos_idx = tf.gather(pos, idx)
         return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
-
-
-
 
 
     def highway_maxout(self, hidden_size, pool_size):
@@ -254,6 +258,8 @@ class Decoder(object):
             highway_beta = self.highway_maxout(hidden_size, maxout_size)
             # reshape knowledge_rep, (context, batch_size, 2*hidden_size)
             U = tf.transpose(knowledge_rep[:,:max_timesteps,:], perm=[1, 0, 2])
+            r, s, t = U.get_shape()
+            tf.assert_equal([r.value, t.value], [FLAGS.para_size, 2*FLAGS.state_size])
             # batch indices
             loop_until = tf.to_int32(np.array(range(batch_size)))
             # initial estimated positions
@@ -297,6 +303,8 @@ class Decoder(object):
                 self._alpha.append(tf.reshape(alpha, [batch_size, -1]))
                 self._beta.append(tf.reshape(beta, [batch_size, -1]))
 
+        r, s = self._alpha[-1].get_shape()
+        tf.assert_equal([s.value], [FLAGS.para_size])
         return self._alpha[-1], self._beta[-1]
 
 class QASystem(object):
@@ -318,8 +326,8 @@ class QASystem(object):
         self.question = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
         self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
-        self.label_start_placeholder = tf.placeholder(tf.float32)
-        self.label_end_placeholder = tf.placeholder(tf.float32)
+        self.label_start_placeholder = tf.placeholder(tf.int32)
+        self.label_end_placeholder = tf.placeholder(tf.int32)
         self.vocab_dim = encoder.vocab_dim
 
         # ==== assemble pieces ====
@@ -352,8 +360,10 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score))
-            loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score))
+            print(self.label_start_placeholder.get_shape(), 'yoooo')
+            print(self.start_token_score.get_shape(), 'maaan')
+            loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.label_start_placeholder, logits=self.start_token_score))
+            loss += tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.label_end_placeholder, logits=self.end_token_score))
             return loss
             # temp1s = tf.multiply(tf.exp(self.start_token_soft), self.mask_placeholder)
             # temp2 = tf.multiply(tf.exp(self.end_token_soft), self.mask_placeholder)
