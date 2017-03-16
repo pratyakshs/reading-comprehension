@@ -158,9 +158,11 @@ class QASystem(object):
 
         # ==== set up training/updating procedure ====
         # pass
-        t_opt=tf.train.AdamOptimizer(learning_rate=self.lr)
-        self.train_op=t_opt.minimize(loss)
-
+        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
+        global_step = tf.Variable(0, trainable=False)
+        t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
+        self.train_op = t_opt.minimize(loss, global_step=global_step)
+        
 
     def setup_system(self, encoder, decoder):
         """
@@ -180,9 +182,11 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score))
-            loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score))
-            return loss
+            loss1 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score)
+            loss2 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score)
+            loss1 = tf.multiply(loss1, tf.to_float(self.mask_placeholder))
+            loss2 = tf.multiply(loss2, tf.to_float(self.mask_placeholder))
+            return tf.reduce_sum(loss1 + loss2)
             # temp1s = tf.multiply(tf.exp(self.start_token_soft), self.mask_placeholder)
             # temp2 = tf.multiply(tf.exp(self.end_token_soft), self.mask_placeholder)
             # loss = tf.reduce_sum(tf.multiply(tf.label_start_placeholder,temp1))/tf.reduce_sum(temp1)
@@ -223,18 +227,23 @@ class QASystem(object):
 
         return outputs
 
-    def test(self, session, valid_x, valid_y):
+    def test(self, session, item):
         """
         in here you should compute a cost for your validation set
         and tune your hyperparameters according to the validation set performance
         :return:
         """
-        input_feed = {}
-
+        paragraph= item['context']
+        question = item['question']
+        input_feed = {self.paragraph:paragraph,
+        self.question:question,
+        self.label_start_placeholder:start,
+        self.label_end_placeholder:end}
+        yp, yp2 = self.decode(session, paragraph, question)
         # fill in this feed_dictionary like:
         # input_feed['valid_x'] = valid_x
 
-        output_feed = []
+        output_feed = [self.loss]
 
         outputs = session.run(output_feed, input_feed)
 
@@ -283,8 +292,8 @@ class QASystem(object):
         """
         valid_cost = 0
 
-        for valid_x, valid_y in valid_dataset:
-          valid_cost = self.test(sess, valid_x, valid_y)
+        for item in valid_dataset:
+          valid_cost += self.test(sess, valid_x, valid_y)
 
 
         return valid_cost
