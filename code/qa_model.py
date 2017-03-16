@@ -442,8 +442,8 @@ class QASystem(object):
         question = item['question']
         yp, yp2 = self.decode(session, paragraph, question)
 
-        a_s = np.argmax(yp[item['context_mask']], axis=1)
-        a_e = np.argmax(yp2[item['context_mask']], axis=1)
+        a_s = np.argmax(yp[item['contextMask']], axis=1)
+        a_e = np.argmax(yp2[item['contextMask']], axis=1)
 
         return (a_s, a_e)
 
@@ -485,11 +485,13 @@ class QASystem(object):
 
         f1 = 0.
         em = 0.
-        for itr in np.random.randint(len(dataset.shape[0]), size=sample):
-            item = dataset[i]
-            start, end = answer(session, item)
-            ans = ' '.join([vocab[x] for x in item['context'][start:end+1] if x in vocab])
-            check = [' '.join([vocab[x] for x in lst]) for lst in item['span']]
+        for itr in np.random.randint(len(dataset['context']), size=sample):
+            context = dataset['context'][itr]
+            span = dataset['span'][itr]
+            item = {key: dataset[key][itr] for key in dataset.keys()}
+            start, end = self.answer(session, item)
+            ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
+            check = [' '.join([vocab[x] for x in lst]) for lst in span]
             f1 += metric_max_over_ground_truths(f1_score, ans, check)
             em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
