@@ -140,6 +140,7 @@ class QASystem(object):
         self.lr = 0.001
         self.max_para = 100
         self.max_ques = 10
+        self.batch_size = 1
 
         # ==== set up placeholder tokens ========
         self.paragraph = tf.placeholder(tf.int32)
@@ -328,7 +329,7 @@ class QASystem(object):
 
         return f1, em
 
-    def train(self, session, dataset, train_dir):
+    def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
         """
         Implement main training loop
 
@@ -369,8 +370,17 @@ class QASystem(object):
                 loss_out = self.optimize(session, question, paragraph, start, end)
                 i += 1
                 if i % 1000:
-                    print("[Sample] loss_out: %.8f" % (loss_out))
-                    f1, em = self.evaluate_answer(session, dataset, vocab, sample=100)
-                    print("[Sample] f1: %.8f, em: %.8f" % (f1, em))
+                    print("[Sample] loss_out: %.8f " % (loss_out))
+                    f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
 
-        
+            self.checkpoint_dir = "match_lstm"
+            model_name = "match_lstm.model-epoch"
+            model_dir = "squad_%s" % (self.batch_size)
+            checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
+
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+
+            self.saver.save(self.sess,
+                           os.path.join(checkpoint_dir, model_name),
+                           global_step=itr)
