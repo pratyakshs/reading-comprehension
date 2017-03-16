@@ -29,6 +29,9 @@ class Encoder(object):
     def __init__(self, size, vocab_dim):
         self.size = size
         self.vocab_dim = vocab_dim
+        self.initial_encoder = tf.nn.rnn_cell.GRUCell(self.size)
+        self.match_encoder_f = tf.nn.rnn_cell.GRUCell(self.size)
+        self.match_encoder_b = tf.nn.rnn_cell.GRUCell(self.size)
 
     class MatchGRUCell(tf.nn.rnn_cell.RNNCell):
         """Wrapper around our RNN cell implementation that allows us to play
@@ -94,13 +97,13 @@ class Encoder(object):
         return attn_func
 
     def encode(self, paragraph, question, masks=None, encoder_state_input=None):
-        _, para_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), paragraph)
-        _, q_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), question)
+        _, para_stat = tf.nn.dynamic_rnn(self.initial_encoder, paragraph, dtype=tf.float32)
+        _, q_stat = tf.nn.dynamic_rnn(self.initial_encoder, question, dtype=tf.float32)
         attn_func = self.give_attn_func(q_stat)
         forward = \
-        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
+        self.MatchGRUCell(self.size, attn_func, self.match_encoder_f)
         backward = \
-        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
+        self.MatchGRUCell(self.size, attn_func, self.match_encoder_b)
         _, state = tf.nn.bidirectional_dynamic_rnn(forward, backward, inputs)
         state = tf.concat(state, 2)
         return state
