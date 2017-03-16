@@ -11,10 +11,21 @@ import tensorflow as tf
 from tensorflow.python.ops import variable_scope as vs
 import re
 
+from tensorflow.contrib.layers.python.layers import utils
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor_shape
+from tensorflow.python.ops import gen_array_ops
+from tensorflow.python.ops import init_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import variable_scope as vs
+from tensorflow.python.util import nest
+
 from evaluate import exact_match_score, f1_score, metric_max_over_ground_truths
 
 logging.basicConfig(level=logging.INFO)
 FLAGS = tf.app.flags.FLAGS
+
 
 def get_optimizer(opt):
     if opt == "adam":
@@ -25,90 +36,197 @@ def get_optimizer(opt):
         assert (False)
     return optfn
 
+
+def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None):
+  """Linear map: concat(W[i] * args[i]), where W[i] is a variable.
+  Args:
+    args: a 3D Tensor with shape [batch x m x n].
+    output_size: int, second dimension of W[i] with shape [output_size x m].
+    bias: boolean, whether to add a bias term or not.
+    bias_start: starting value to initialize the bias; 0 by default.
+    scope: (optional) Variable scope to create parameters in.
+    name: (optional) variable name.
+  Returns:
+    A 3D Tensor with shape [batch x output_size x n] equal to
+    concat(W[i] * args[i]), where W[i]s are newly created matrices.
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+  if args is None or (nest.is_sequence(args) and not args):
+    raise ValueError("`args` must be specified")
+  if args.get_shape().ndims != 3:
+    raise ValueError("`args` must be a 3D Tensor")
+
+  shape = args.get_shape()
+  m = shape[1].value
+  n = shape[2].value
+  dtype = args.dtype
+
+  # Now the computation.
+  scope = vs.get_variable_scope()
+  with vs.variable_scope(scope) as outer_scope:
+    w_name = "weights_"
+    if name is not None: w_name += name
+    weights = vs.get_variable(
+        w_name, [output_size, m], dtype=dtype)
+    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args)
+    if not bias:
+      return res
+    with vs.variable_scope(outer_scope) as inner_scope:
+      b_name = "biases_"
+      if name is not None: b_name += name
+      inner_scope.set_partitioner(None)
+      biases = vs.get_variable(
+          b_name, [output_size, n],
+          dtype=dtype,
+          initializer=init_ops.constant_initializer(bias_start, dtype=dtype))
+  return tf.map_fn(lambda x: math_ops.add(x, biases), res)
+
+
 class Encoder(object):
     def __init__(self, size, vocab_dim):
+        # size of hidden state
         self.size = size
         self.vocab_dim = vocab_dim
 
-    class MatchGRUCell(tf.nn.rnn_cell.RNNCell):
-        """Wrapper around our RNN cell implementation that allows us to play
-        nicely with TensorFlow.
-        """
-        def __init__(self, state_size, attention_func, cell):
-            # self.input_size = input_size
-            self._state_size = state_size
-            self.attention_func = attention_func
-            self.GRUcell = cell
-
-        @property
-        def state_size(self):
-            return self._state_size
-
-        @property
-        def output_size(self):
-            return self._state_size
-
-        def __call__(self, inputs, state, scope=None):
-            """Updates the state using the previous @state and @inputs.
-            Args:
-                inputs: is the input vector of size [None, self.input_size]
-                state: is the previous state vector of size [None, self.state_size]
-                scope: is the name of the scope to be used when defining the variables inside.
-            Returns:
-                a pair of the output vector and the new state vector.
-            """
-            scope = scope or type(self).__name__
-            attWeight = self.attention_func(inputs, state)
-            inp = tf.concat(2, [state, attWeight])
-            _, new_state = self.GRUCell(inp, state)
-            output = new_state
-            return output, new_state
-
-    def give_attn_func(self, Hq):
-        def attn_func(inputs, state):
-            with tf.variable_scope("attn_func_encode", \
-                initializer=tf.contrib.layers.xavier_initializer(), reuse=True):
-                ### YOUR CODE HERE (~6-10 lines)
-                Wq = tf.get_variable("W_q", (self.size, self.size))
-                Wp = tf.get_variable("W_p", (self.size, self.size))
-                Wm = tf.get_variable("W_m", (self.size, self.size))
-                bp = tf.get_variable("b_p", (self.size,),\
-                 initializer=tf.constant_initializer(0))
-                w = tf.get_variable("w_att", (self.size, ))
-                mid_st = tf.nn.tanh(tf.matmul(Hq,Wq) + tf.matmul(state,Wm)\
-                 + tf.matmul(inputs, Wp) + bp)
-                b = tf.get_variable("b", (1,),\
-                    initializer=tf.constant_initializer(0))
-                return tf.matmul(tf.softmax(tf.matmul(mid_st, w) + b), Hq)
-        with tf.variable_scope("attn_func_encode", \
-            initializer=tf.contrib.layers.xavier_initializer()):
-            ### YOUR CODE HERE (~6-10 lines)
-            Wq = tf.get_variable("W_q", (self.size, self.size))
-            Wp = tf.get_variable("W_p", (self.size, self.size))
-            Wm = tf.get_variable("W_m", (self.size, self.size))
-            bp = tf.get_variable("b_p", (self.size,),\
-             initializer=tf.constant_initializer(0))
-            w = tf.get_variable("w_att", (self.size, ))
-            b = tf.get_variable("b", (1,),\
-                    initializer=tf.constant_initializer(0))
-        return attn_func
-
     def encode(self, paragraph, question, masks=None, encoder_state_input=None):
-        _, para_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), paragraph)
-        _, q_stat = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(self.size), question)
-        attn_func = self.give_attn_func(q_stat)
-        forward = \
-        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
-        backward = \
-        tf.contrib.rnn.GRUCell(self.MatchGRUCell(self.size, attn_func,tf.contrib.rnn.GRUCell(self.size)))
-        _, state = tf.nn.bidirectional_dynamic_rnn(forward, backward, inputs)
-        state = tf.concat(state, 2)
-        return state
+        # assume paragraph and question are already embeddings
+        lstm_enc = tf.nn.rnn_cell.LSTMCell(self.size)
+
+        with tf.variable_scope('paragraph_encoder'):
+            para, _ = tf.nn.dynamic_rnn(lstm_enc, paragraph, dtype=tf.float32)
+            # append sentinel
+            fn = lambda x: tf.concat(
+                0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
+            para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32)
+
+        with tf.variable_scope('question_encoder'):
+            ques, _ = tf.nn.dynamic_rnn(lstm_enc, question, dtype=tf.float32)
+            # append sentinel
+            fn = lambda x: tf.concat(
+                0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
+            ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32)
+            ques_encoding = tf.tanh(batch_linear(ques_encoding, FLAGS.question_size+1, True))
+            ques_variation = tf.transpose(ques_encoding, perm=[0, 2, 1])
+
+        with tf.variable_scope('coattention'):
+            # compute affinity matrix, (batch_size, context+1, question+1)
+            L = tf.batch_matmul(para_encoding, ques_variation)
+            # shape = (batch_size, question+1, context+1)
+            L_t = tf.transpose(L, perm=[0, 2, 1])
+            # normalize with respect to question
+            a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32)
+            # normalize with respect to context
+            a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32)
+            # summaries with respect to question, (batch_size, question+1, hidden_size)
+            c_q = tf.batch_matmul(a_q, para_encoding)
+            c_q_emb = tf.concat(1, [ques_variation, tf.transpose(c_q, perm=[0, 2 ,1])])
+            # summaries of previous attention with respect to context
+            c_d = tf.batch_matmul(c_q_emb, a_c, adj_y=True)
+            # final coattention context, (batch_size, context+1, 3*hidden_size)
+            co_att = tf.concat(2, [para_encoding, tf.transpose(c_d, perm=[0, 2, 1])])
+
+
+        with tf.variable_scope('encoder'):
+            # LSTM for coattention encoding
+            cell_fw = tf.nn.rnn_cell.LSTMCell(self.size)
+            cell_bw = tf.nn.rnn_cell.LSTMCell(self.size)
+            # compute coattention encoding
+            u, _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw, cell_bw, co_att,
+                sequence_length=tf.to_int64([FLAGS.para_size]*FLAGS.batch_size),
+                dtype=tf.float32)
+            self._u = tf.concat(2, u)
+
+        return self._u
 
 
 class Decoder(object):
     def __init__(self, output_size):
         self.output_size = output_size
+
+
+    def _select(self, u, pos, idx):
+        u_idx = tf.gather(u, idx)
+        pos_idx = tf.gather(pos, idx)
+        return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
+
+
+
+
+
+    def highway_maxout(self, hidden_size, pool_size):
+        """highway maxout network."""
+
+        def maxout(inputs,
+                   num_units,
+                   axis=None,
+                   outputs_collections=None,
+                   scope=None):
+            """Adds a maxout op which is a max pooling performed in filter/channel
+            dimension. This can also be used after fully-connected layers to reduce
+            number of features.
+            Args:
+                inputs: A Tensor on which maxout will be performed
+                num_units: Specifies how many features will remain after max pooling at the
+                    channel dimension. This must be multiple of number of channels.
+                axis: The dimension where max pooling will be performed. Default is the
+                    last dimension.
+                outputs_collections: The collections to which the outputs are added.
+                scope: Optional scope for name_scope.
+            Returns:
+                A `Tensor` representing the results of the pooling operation.
+            Raises:
+                ValueError: if num_units is not multiple of number of features.
+            """
+            with ops.name_scope(scope, 'MaxOut', [inputs]) as sc:
+                inputs = ops.convert_to_tensor(inputs)
+                shape = inputs.get_shape().as_list()
+                if axis is None:
+                    # Assume that channel is the last dimension
+                    axis = -1
+                num_channels = shape[axis]
+                if num_channels % num_units:
+                    raise ValueError('number of features({}) is not '
+                                     'a multiple of num_units({})'
+                        .format(num_channels, num_units))
+                shape[axis] = -1
+                shape += [num_channels // num_units]
+                outputs = math_ops.reduce_max(gen_array_ops.reshape(inputs, shape), -1,
+                                              keep_dims=False)
+            return utils.collect_named_outputs(outputs_collections, sc, outputs)
+
+        def _to_3d(tensor):
+            if tensor.get_shape().ndims != 2:
+                raise ValueError("`tensor` must be a 2D Tensor")
+            m, n = tensor.get_shape()
+            return tf.reshape(tensor, [m.value, n.value, 1])
+
+        def compute(u_t, h, u_s, u_e):
+            """Computes value of u_t given current u_s and u_e."""
+            # reshape
+            u_t = _to_3d(u_t)
+            h = _to_3d(h)
+            u_s = _to_3d(u_s)
+            u_e = _to_3d(u_e)
+            # non-linear projection of decoder state and coattention
+            state_s = tf.concat(1, [h, u_s, u_e])
+            r = tf.tanh(batch_linear(state_s, hidden_size, False, name='r'))
+            u_r = tf.concat(1, [u_t, r])
+            # first maxout
+            m_t1 = batch_linear(u_r, pool_size*hidden_size, True, name='m_1')
+            m_t1 = maxout(m_t1, hidden_size, axis=1)
+            # second maxout
+            m_t2 = batch_linear(m_t1, pool_size*hidden_size, True, name='m_2')
+            m_t2 = maxout(m_t2, hidden_size, axis=1)
+            # highway connection
+            mm = tf.concat(1, [m_t1, m_t2])
+            # final maxout
+            res = maxout(batch_linear(mm, pool_size, True, name='mm'), 1, axis=1)
+            return res
+
+        return compute
+
 
     def decode(self, knowledge_rep):
         """
@@ -122,10 +240,64 @@ class Decoder(object):
                               decided by how you choose to implement the encoder
         :return:
         """
-        forward = tf.contrib.rnn.LSTMCell(self.output_size)
-        backward = tf.contrib.rnn.LSTMCell(self.output_size)
-        output, _ = tf.nn.bidirectional_dynamic_rnn(forward, backward, knowledge_rep)
-        return tf.split(output, 2, axis=2)
+        batch_size = FLAGS.batch_size
+        hidden_size = FLAGS.state_size
+        maxout_size = FLAGS.maxout_size
+        max_timesteps = FLAGS.para_size
+        max_decode_steps = FLAGS.max_decode_steps
+
+        with tf.variable_scope('selector'):
+            # LSTM for decoding
+            lstm_dec = tf.nn.rnn_cell.LSTMCell(hidden_size)
+            # init highway fn
+            highway_alpha = self.highway_maxout(hidden_size, maxout_size)
+            highway_beta = self.highway_maxout(hidden_size, maxout_size)
+            # reshape knowledge_rep, (context, batch_size, 2*hidden_size)
+            U = tf.transpose(knowledge_rep[:,:max_timesteps,:], perm=[1, 0, 2])
+            # batch indices
+            loop_until = tf.to_int32(np.array(range(batch_size)))
+            # initial estimated positions
+            s, e = tf.split(0, 2, [0, 1])
+
+            fn = lambda idx: self._select(knowledge_rep, s, idx)
+            u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+
+            fn = lambda idx: self._select(knowledge_rep, e, idx)
+            u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+
+
+        self._s, self._e = [], []
+        self._alpha, self._beta = [], []
+        with tf.variable_scope('decoder') as vs:
+            for step in range(max_decode_steps):
+                if step > 0: vs.reuse_variables()
+                # single step lstm
+                _input = tf.concat(1, [u_s, u_e])
+                _, h = tf.nn.rnn(lstm_dec, [_input], dtype=tf.float32)
+                h_state = tf.concat(1, h)
+                with tf.variable_scope('highway_alpha'):
+                    # compute start position first
+                    fn = lambda u_t: highway_alpha(u_t, h_state, u_s, u_e)
+                    alpha = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32)
+                    s = tf.reshape(tf.argmax(alpha, 0), [batch_size])
+                    # update start guess
+                    fn = lambda idx: self._select(knowledge_rep, s, idx)
+                    u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+                with tf.variable_scope('highway_beta'):
+                    # compute end position next
+                    fn = lambda u_t: highway_beta(u_t, h_state, u_s, u_e)
+                    beta = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32)
+                    e = tf.reshape(tf.argmax(beta, 0), [batch_size])
+                    # update end guess
+                    fn = lambda idx: self._select(knowledge_rep, e, idx)
+                    u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+
+                self._s.append(s)
+                self._e.append(e)
+                self._alpha.append(tf.reshape(alpha, [batch_size, -1]))
+                self._beta.append(tf.reshape(beta, [batch_size, -1]))
+
+        return self._alpha[-1], self._beta[-1]
 
 class QASystem(object):
     def __init__(self, encoder, decoder, embed_path, *args):
@@ -140,7 +312,6 @@ class QASystem(object):
         self.lr = 0.001
         self.max_para = 100
         self.max_ques = 10
-        self.batch_size = 1
 
         # ==== set up placeholder tokens ========
         self.paragraph = tf.placeholder(tf.int32)
@@ -159,11 +330,9 @@ class QASystem(object):
 
         # ==== set up training/updating procedure ====
         # pass
-        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
-        global_step = tf.Variable(0, trainable=False)
-        t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
-        self.train_op = t_opt.minimize(loss, global_step=global_step)
-        
+        t_opt=tf.train.AdamOptimizer(learning_rate=self.lr)
+        self.train_op=t_opt.minimize(self.loss)
+
 
     def setup_system(self, encoder, decoder):
         """
@@ -183,11 +352,9 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            loss1 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score)
-            loss2 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score)
-            loss1 = tf.multiply(loss1, tf.to_float(self.mask_placeholder))
-            loss2 = tf.multiply(loss2, tf.to_float(self.mask_placeholder))
-            return tf.reduce_sum(loss1 + loss2)
+            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, self.start_token_score))
+            loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score))
+            return loss
             # temp1s = tf.multiply(tf.exp(self.start_token_soft), self.mask_placeholder)
             # temp2 = tf.multiply(tf.exp(self.end_token_soft), self.mask_placeholder)
             # loss = tf.reduce_sum(tf.multiply(tf.label_start_placeholder,temp1))/tf.reduce_sum(temp1)
@@ -228,23 +395,18 @@ class QASystem(object):
 
         return outputs
 
-    def test(self, session, item):
+    def test(self, session, valid_x, valid_y):
         """
         in here you should compute a cost for your validation set
         and tune your hyperparameters according to the validation set performance
         :return:
         """
-        paragraph= item['context']
-        question = item['question']
-        input_feed = {self.paragraph:paragraph,
-        self.question:question,
-        self.label_start_placeholder:start,
-        self.label_end_placeholder:end}
-        yp, yp2 = self.decode(session, paragraph, question)
+        input_feed = {}
+
         # fill in this feed_dictionary like:
         # input_feed['valid_x'] = valid_x
 
-        output_feed = [self.loss]
+        output_feed = []
 
         outputs = session.run(output_feed, input_feed)
 
@@ -293,8 +455,8 @@ class QASystem(object):
         """
         valid_cost = 0
 
-        for item in valid_dataset:
-          valid_cost += self.test(sess, valid_x, valid_y)
+        for valid_x, valid_y in valid_dataset:
+          valid_cost = self.test(sess, valid_x, valid_y)
 
 
         return valid_cost
@@ -329,7 +491,7 @@ class QASystem(object):
 
         return f1, em
 
-    def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
+    def train(self, session, dataset, train_dir):
         """
         Implement main training loop
 
@@ -358,29 +520,10 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
+
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
-        i = 0
-        for itr in range(100):
-            for item in dataset:
-                loss_out = self.optimize(session, question, paragraph, start, end)
-                i += 1
-                if i % 1000:
-                    print("[Sample] loss_out: %.8f " % (loss_out))
-                    f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
-
-            self.checkpoint_dir = "match_lstm"
-            model_name = "match_lstm.model-epoch"
-            model_dir = "squad_%s" % (self.batch_size)
-            checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
-
-            if not os.path.exists(checkpoint_dir):
-                os.makedirs(checkpoint_dir)
-
-            self.saver.save(self.sess,
-                           os.path.join(checkpoint_dir, model_name),
-                           global_step=itr)
