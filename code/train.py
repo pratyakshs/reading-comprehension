@@ -93,7 +93,9 @@ def init_dataset(data_dir, val=False):
         cfile = pjoin(data_dir, 'train.ids.context')
         sfile = pjoin(data_dir, 'train.span')
 
-    dataset_dicts = []
+    dataset_dicts = {'question': [], 'questionMask': [], 'context': [],
+                     'contextMask': [], 'span': []}
+
     with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
         question = [int(word) for word in qf.next().strip().split()]
         context = [int(word) for word in cf.next().strip().split()]
@@ -116,11 +118,13 @@ def init_dataset(data_dir, val=False):
             c_mask = [True] * len(context) + [False] *  (FLAGS.para_size - len(context))
         span = sf.next().strip()
 
-        dataset_dicts.append({'question': question,
-                              'questionMask': q_mask,
-                              'context': context,
-                              'contextMask': c_mask,
-                              'span': span})
+
+        dataset_dicts['question'].append(question)
+        dataset_dicts['questionMask'].append(q_mask)
+        dataset_dicts['context'].append(context)
+        dataset_dicts['contextMask'].append(c_mask)
+        dataset_dicts['span'].append(span)
+
     return dataset_dicts
 
 
