@@ -368,17 +368,11 @@ class QASystem(object):
         """
         with vs.variable_scope("embeddings"):
             para_embedding_list = tf.Variable(self.pretrained_embeddings)
-            print('pel', para_embedding_list)
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
-            print('pembeddings', para_embeddings)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
-            print('self.pe', self.para_embeddings)
             ques_embedding_list = tf.Variable(self.pretrained_embeddings)
-            print('qel', ques_embedding_list)
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
-            print('qembeddings', ques_embeddings)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
-            print('self.qe', self.ques_embeddings)
             # pass
 
     def optimize(self, session, question, paragraph, start, end):
@@ -438,12 +432,12 @@ class QASystem(object):
         return outputs
 
     def answer(self, session, item):
-        paragraph= item['context']
+        paragraph = item['context']
         question = item['question']
+        mask = np.array(item['contextMask'])
         yp, yp2 = self.decode(session, paragraph, question)
-
-        a_s = np.argmax(yp[item['contextMask']], axis=1)
-        a_e = np.argmax(yp2[item['contextMask']], axis=1)
+        a_s = np.argmax(np.ma.masked_array(yp, ~mask), axis=1)
+        a_e = np.argmax(np.ma.masked_array(yp2, ~mask), axis=1)
 
         return (a_s, a_e)
 
@@ -490,8 +484,14 @@ class QASystem(object):
             span = dataset['span'][itr]
             item = {key: dataset[key][itr] for key in dataset.keys()}
             start, end = self.answer(session, item)
+            start = start[0]
+            end = end[0]
             ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
-            check = [' '.join([vocab[x] for x in lst]) for lst in span]
+            check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1]])
+            print('span', span)
+            print('startend', start, end)
+            print('ans', ans)
+            print('check', check)
             f1 += metric_max_over_ground_truths(f1_score, ans, check)
             em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
@@ -538,7 +538,7 @@ class QASystem(object):
         print('question.size', np.array(question).shape)
         print('context.size', np.array(context).shape)
         print('span.size', np.array(span).shape)
-        i = 0
+        i = 1
         for itr in range(100):
             for j in range(len(question)):
                 print('iter,', itr, 'j=', j)
@@ -549,7 +549,7 @@ class QASystem(object):
                 c = np.array(context[i]).reshape((FLAGS.para_size, 1))
                 loss_out = self.optimize(session, question[i], context[i], span[i][0], span[i][1])
                 i += 1
-                if i % 1000:
+                if i % 1000 == 0:
                     print("[Sample] loss_out:", (loss_out))
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
 
