@@ -34,6 +34,10 @@ tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab 
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
+tf.app.flags.DEFINE_integer("max_decode_steps", 4, "Maximum number of decode steps (default 4)")
+tf.app.flags.DEFINE_integer("maxout_size", 32, "Size of maxout in decoder (default 32)")
+
+
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -129,12 +133,11 @@ def main(_):
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
     vocab, rev_vocab = initialize_vocab(vocab_path)
-    # print(vocab)
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder)
+    qa = QASystem(encoder, decoder, embed_path)
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)
