@@ -310,8 +310,8 @@ class QASystem(object):
         """
         #==========Config Variables========#
         self.lr = 0.001
-        self.max_para = 100
-        self.max_ques = 10
+        self.max_para = FLAGS.para_size
+        self.max_ques = FLAGS.question_size
 
         # ==== set up placeholder tokens ========
         self.paragraph = tf.placeholder(tf.int32)
@@ -368,11 +368,17 @@ class QASystem(object):
         """
         with vs.variable_scope("embeddings"):
             para_embedding_list = tf.Variable(self.pretrained_embeddings)
+            print('pel', para_embedding_list)
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
+            print('pembeddings', para_embeddings)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
+            print('self.pe', self.para_embeddings)
             ques_embedding_list = tf.Variable(self.pretrained_embeddings)
+            print('qel', ques_embedding_list)
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
+            print('qembeddings', ques_embeddings)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
+            print('self.qe', self.ques_embeddings)
             # pass
 
     def optimize(self, session, question, paragraph, start, end):
@@ -542,7 +548,7 @@ class QASystem(object):
                 loss_out = self.optimize(session, question[i], context[i], span[i][0], span[i][1])
                 i += 1
                 if i % 1000:
-                    print("[Sample] loss_out: %.8f " % (loss_out))
+                    print("[Sample] loss_out:", (loss_out))
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
 
             self.checkpoint_dir = "match_lstm"
