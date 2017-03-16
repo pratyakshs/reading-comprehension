@@ -142,8 +142,8 @@ class QASystem(object):
         self.max_ques = 10
 
         # ==== set up placeholder tokens ========
-        self.paragraph = tf.placeholder(tf.float32)
-        self.question = tf.placeholder(tf.float32)
+        self.paragraph = tf.placeholder(tf.int32)
+        self.question = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
         self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
         self.label_start_placeholder = tf.placeholder(tf.float32)
@@ -357,9 +357,20 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
-
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+
+        i = 0
+        for itr in range(100):
+            for item in dataset:
+                loss_out = self.optimize(session, question, paragraph, start, end)
+                i += 1
+                if i % 1000:
+                    print("[Sample] loss_out: %.8f" % (loss_out))
+                    f1, em = self.evaluate_answer(session, dataset, vocab, sample=100)
+                    print("[Sample] f1: %.8f, em: %.8f" % (f1, em))
+
+        
