@@ -529,25 +529,25 @@ class QASystem(object):
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
-        print(type(dataset))
         question = dataset['question']
         questionMask = dataset['questionMask']
         context = dataset['context']
         contextMask = dataset['contextMask']
-        span = dataset['span']
-        print('question.size', np.array(question).shape)
-        print('context.size', np.array(context).shape)
-        print('span.size', np.array(span).shape)
+        span = np.array(dataset['span'])
+
+        batch_size = FLAGS.batch_size
+        num_examples = len(question)
+        num_batches = int(num_examples / batch_size) + 1
+
         i = 1
         for itr in range(100):
-            for j in range(len(question)):
+            for j in range(num_batches):
                 print('iter,', itr, 'j=', j)
-                print('question[i]', question[i])
-                print('context[i]', context[i])
-                print('span[i]', span[i])
-                q = np.array(question[i]).reshape((FLAGS.question_size, 1))
-                c = np.array(context[i]).reshape((FLAGS.para_size, 1))
-                loss_out = self.optimize(session, question[i], context[i], span[i][0], span[i][1])
+                question_batch = question[j*batch_size:(j+1)*batch_size]
+                context_batch = context[j*batch_size:(j+1)*batch_size]
+                start_batch = span[j*batch_size:(j+1)*batch_size,0]
+                end_batch = span[j*batch_size:(j+1)*batch_size,1]
+                loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch)
                 i += 1
                 if i % 1000 == 0:
                     print("[Sample] loss_out:", (loss_out))
