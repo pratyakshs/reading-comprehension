@@ -491,23 +491,18 @@ class QASystem(object):
 
         return f1, em
 
-    def train(self, session, dataset, train_dir):
+    def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
         """
         Implement main training loop
-
         TIPS:
         You should also implement learning rate annealing (look into tf.train.exponential_decay)
         Considering the long time to train, you should save your model per epoch.
-
         More ambitious appoarch can include implement early stopping, or reload
         previous models if they have higher performance than the current one
-
         As suggested in the document, you should evaluate your training progress by
         printing out information every fixed number of iterations.
-
         We recommend you evaluate your model performance on F1 and EM instead of just
         looking at the cost.
-
         :param session: it should be passed in from train.py
         :param dataset: a representation of our data, in some implementations, you can
                         pass in multiple components (arguments) of one dataset to this function
@@ -520,10 +515,29 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
-
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
+        i = 0
+        for itr in range(100):
+            for item in dataset:
+                loss_out = self.optimize(session, question, paragraph, start, end)
+                i += 1
+                if i % 1000:
+                    print("[Sample] loss_out: %.8f " % (loss_out))
+                    f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
+
+            self.checkpoint_dir = "match_lstm"
+            model_name = "match_lstm.model-epoch"
+            model_dir = "squad_%s" % (self.batch_size)
+            checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
+
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+
+            self.saver.save(self.sess,
+                           os.path.join(checkpoint_dir, model_name),
+                           global_step=itr)
