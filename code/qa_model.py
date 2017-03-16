@@ -145,7 +145,7 @@ class QASystem(object):
         self.paragraph = tf.placeholder(tf.float32)
         self.question = tf.placeholder(tf.float32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
-        self.pretrained_embeddings = np.load(embed_path)
+        self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
         self.label_start_placeholder = tf.placeholder(tf.float32)
         self.label_end_placeholder = tf.placeholder(tf.float32)
         self.vocab_dim = encoder.vocab_dim
