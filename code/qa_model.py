@@ -96,9 +96,10 @@ class Encoder(object):
                 tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
                  + tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) + self.bp),\
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
-            mid_st=tf.multiply(tf.to_float(mask), tf.exp(mid_st))
+            mid_st=tf.multiply(tf.to_float32(mask), tf.exp(mid_st))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             # tf.nn.softmax(tf.matmul(mid_st, self.w) + self.b)
+            print(mid_st)
             mid_st = tf.reshape(tf.batch_matmul(tf.reshape(mid_st,\
             [-1, 1,int(Hq.get_shape()[1])]), Hq),\
             [-1, int(Hq.get_shape()[2])])
@@ -163,7 +164,7 @@ class Decoder(object):
             tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba),\
               [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
             print(self.start_logits.get_shape())
-            mid_st=tf.multiply(tf.to_float(mask), tf.exp(self.start_logits))
+            mid_st=tf.multiply(tf.to_float32(mask), tf.exp(self.start_logits))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             attention_mat = tf.batch_matmul(tf.reshape(tf.nn.softmax(\
             mid_st),[-1, 1, int(Hq.get_shape()[1])]), Hq)
@@ -210,7 +211,7 @@ class QASystem(object):
         self.paragraph_len = tf.placeholder(tf.int32)
         self.question_len = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
-        self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
+        self.pretrained_embeddings = np.load(embed_path)['glove']
         self.label_start_placeholder = tf.placeholder(tf.float32)
         self.label_end_placeholder = tf.placeholder(tf.float32)
         self.vocab_dim = encoder.vocab_dim
@@ -223,10 +224,10 @@ class QASystem(object):
 
         # ==== set up training/updating procedure ====
         # pass
-        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
         global_step = tf.Variable(0, trainable=False)
+        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
         t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
-        self.train_op = t_opt.minimize(loss, global_step=global_step)
+        self.train_op = t_opt.minimize(self.loss, global_step=global_step)
         
 
     def setup_system(self, encoder, decoder):
@@ -249,11 +250,11 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.start_token_score))
+            mid_st=tf.multiply(tf.to_float32(self.paragraph_mask), tf.exp(self.start_token_score))
             mid_st=tf.multiply(self.label_start_placeholder,\
                 tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
             loss = tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
-            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.end_token_score))
+            mid_st=tf.multiply(tf.to_float32(self.paragraph_mask), tf.exp(self.end_token_score))
             mid_st=tf.multiply(self.label_end_placeholder,\
                 tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
             loss += tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
@@ -332,7 +333,7 @@ class QASystem(object):
 
         return outputs
 
-    def decode(self, session, session, question, paragraph, 
+    def decode(self, session, question, paragraph, 
         question_len, paragraph_mask, paragraph_len):
         """
         Returns the probability distribution over different positions in the paragraph
@@ -541,13 +542,13 @@ class QASystem(object):
                     loss_val = self.validate(session, datasetVal)
                     print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
 
-            self.checkpoint_dir = "match_lstm"
+            self.checkpoint_dir = FLAGS.train_dir
             model_name = "match_lstm.model-epoch"
-            model_dir = "squad_%s" % (FLAGS.batch_size)
-            checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
+            #model_dir = "squad_%s" % (FLAGS.batch_size)
+            #checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
 
             if not os.path.exists(checkpoint_dir):
-                os.makedirs(checkpoint_dir)
+                os.makedirs(self.checkpoint_dir)
             loss_val = self.validate(session, datasetVal)
             if loss_val < min_val:
                 min_model_name = itr
