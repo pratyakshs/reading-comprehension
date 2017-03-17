@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("batch_size", 500, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 10, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 2, "The output size of your model.")
@@ -34,6 +34,8 @@ tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab 
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
+
+
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -90,7 +92,8 @@ def init_dataset(data_dir, val=False):
         sfile = pjoin(data_dir, 'train.span')
 
     dataset_dicts = {'question': [], 'questionMask': [], 'context': [],
-                     'contextMask': [], 'span': []}
+                     'contextMask': [], 'spanStart': [], 'contextLen': [], 
+                     'questionLen': [], 'spanEnd': []}
 
     with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
         for line in qf:
@@ -99,6 +102,7 @@ def init_dataset(data_dir, val=False):
             span = [int(word) for word in sf.next().strip().split()]
 
             # do question padding
+            question_len = len(question)
             if len(question) > FLAGS.question_size:
                 question = question[:FLAGS.question_size]
                 q_mask = [True] * FLAGS.question_size
@@ -107,6 +111,7 @@ def init_dataset(data_dir, val=False):
                 q_mask = [True] * len(question) + [False] *  (FLAGS.question_size - len(question))
 
             # do context padding
+            para_len = len(context)
             if len(context) > FLAGS.para_size:
                 context = context[:FLAGS.para_size]
                 c_mask = [True] * FLAGS.para_size
@@ -119,7 +124,14 @@ def init_dataset(data_dir, val=False):
             dataset_dicts['questionMask'].append(q_mask)
             dataset_dicts['context'].append(context)
             dataset_dicts['contextMask'].append(c_mask)
-            dataset_dicts['span'].append(span)
+            st = [0 for x in range(FLAGS.para_size)]
+            st[span[0]] = 1
+            end = [0 for x in range(FLAGS.para_size)]
+            end[span[1]] = 1
+            dataset_dicts['spanStart'].append(st)
+            dataset_dicts['spanEnd'].append(end)
+            dataset_dicts['contextLen'].append(para_len)
+            dataset_dicts['questionLen'].append(question_len)
 
     return dataset_dicts
 
@@ -133,10 +145,9 @@ def main(_):
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
     vocab, rev_vocab = initialize_vocab(vocab_path)
-    # print(vocab)
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
-    decoder = Decoder(output_size=FLAGS.output_size)
+    decoder = Decoder(output_size=FLAGS.output_size, size=FLAGS.state_size)
 
     qa = QASystem(encoder, decoder, embed_path)
 
@@ -149,7 +160,9 @@ def main(_):
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    with tf.Session() as sess:
+    gpu_options = tf.GPUOptions(allow_growth=True)
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options\
+      , allow_soft_placement=True)) as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
 
