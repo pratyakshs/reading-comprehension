@@ -96,7 +96,7 @@ class Encoder(object):
                 tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
                  + tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) + self.bp),\
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
-            mid_st=tf.multiply(tf.to_float32(mask), tf.exp(mid_st))
+            mid_st=tf.multiply(tf.to_float(mask), tf.exp(mid_st))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             # tf.nn.softmax(tf.matmul(mid_st, self.w) + self.b)
             print(mid_st)
@@ -164,7 +164,7 @@ class Decoder(object):
             tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba),\
               [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
             print(self.start_logits.get_shape())
-            mid_st=tf.multiply(tf.to_float32(mask), tf.exp(self.start_logits))
+            mid_st=tf.multiply(tf.to_float(mask), tf.exp(self.start_logits))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             attention_mat = tf.batch_matmul(tf.reshape(tf.nn.softmax(\
             mid_st),[-1, 1, int(Hq.get_shape()[1])]), Hq)
@@ -250,11 +250,11 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            mid_st=tf.multiply(tf.to_float32(self.paragraph_mask), tf.exp(self.start_token_score))
+            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.start_token_score))
             mid_st=tf.multiply(self.label_start_placeholder,\
                 tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
             loss = tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
-            mid_st=tf.multiply(tf.to_float32(self.paragraph_mask), tf.exp(self.end_token_score))
+            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.end_token_score))
             mid_st=tf.multiply(self.label_end_placeholder,\
                 tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
             loss += tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
@@ -275,10 +275,10 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("embeddings"):
-            para_embedding_list = tf.Variable(self.pretrained_embeddings)
+            para_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32)
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
-            ques_embedding_list = tf.Variable(self.pretrained_embeddings)
+            ques_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32)
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
             # pass
@@ -526,8 +526,8 @@ class QASystem(object):
                 print('iter,', itr, 'j=', j)
                 question_batch = question[j*batch_size:(j+1)*batch_size]
                 context_batch = context[j*batch_size:(j+1)*batch_size]
-                start_batch = span[j*batch_size:(j+1)*batch_size]
-                end_batch = span[j*batch_size:(j+1)*batch_size]
+                start_batch = span_start[j*batch_size:(j+1)*batch_size]
+                end_batch = span_end[j*batch_size:(j+1)*batch_size]
                 question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
                 context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
                 question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
@@ -553,6 +553,4 @@ class QASystem(object):
             if loss_val < min_val:
                 min_model_name = itr
                 print("New min model itr: " + str(itr))
-            self.saver.save(self.sess,
-                           os.path.join(checkpoint_dir, model_name),
-                           global_step=itr)
+            self.saver.save(self.sess, os.path.join(checkpoint_dir, model_name),global_step=itr)
