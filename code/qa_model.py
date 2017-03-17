@@ -307,21 +307,24 @@ class QASystem(object):
 
         return outputs
 
-    def test(self, session, item):
+    def test(self, session, question, paragraph, start, end, 
+        question_mask, question_len, paragraph_mask, paragraph_len):
         """
         in here you should compute a cost for your validation set
         and tune your hyperparameters according to the validation set performance
         :return:
         """
-        paragraph= item['context']
-        question = item['question']
         input_feed = {self.paragraph:paragraph,
         self.question:question,
         self.label_start_placeholder:start,
-        self.label_end_placeholder:end}
-        yp, yp2 = self.decode(session, paragraph, question)
+        self.label_end_placeholder:end,
+        self.question_len: question_len,
+        self.paragraph_mask: paragraph_mask,
+        self.question_mask: question_mask,
+        self.paragraph_len: paragraph_len}
+
         # fill in this feed_dictionary like:
-        # input_feed['valid_x'] = valid_x
+        # input_feed['train_x'] = train_x
 
         output_feed = [self.loss]
 
@@ -329,14 +332,21 @@ class QASystem(object):
 
         return outputs
 
-    def decode(self, session, paragraph, question):
+    def decode(self, session, session, question, paragraph, 
+        question_len, paragraph_mask, paragraph_len):
         """
         Returns the probability distribution over different positions in the paragraph
         so that other methods like self.answer() will be able to work properly
         :return:
         """
         input_feed = {self.paragraph:paragraph,
-        self.question:question}
+        self.question:question,
+        self.label_start_placeholder:None,
+        self.label_end_placeholder:None,
+        self.question_len: question_len,
+        self.paragraph_mask: paragraph_mask,
+        self.question_mask: None,
+        self.paragraph_len: paragraph_len}
 
 
         # fill in this feed_dictionary like:
@@ -349,16 +359,17 @@ class QASystem(object):
         return outputs
 
     def answer(self, session, item):
-        paragraph= item['context']
+        paragraph = item['context']
         question = item['question']
-        yp, yp2 = self.decode(session, paragraph, question)
-
-        a_s = np.argmax(yp[item['context_mask']], axis=1)
-        a_e = np.argmax(yp2[item['context_mask']], axis=1)
+        mask = np.array(item['contextMask'])
+        yp, yp2 = self.decode(session, paragraph, question, item['questionLen'],\
+         mask, item['contextLen'])
+        a_s = np.argmax(np.ma.masked_array(yp, ~mask), axis=1)
+        a_e = np.argmax(np.ma.masked_array(yp2, ~mask), axis=1)
 
         return (a_s, a_e)
 
-    def validate(self, sess, valid_dataset):
+    def validate(self, sess, dataset):
         """
         Iterate through the validation dataset and determine what
         the validation cost is.
@@ -371,12 +382,37 @@ class QASystem(object):
         :return:
         """
         valid_cost = 0
+        question = dataset['question']
+        questionMask = dataset['questionMask']
+        context = dataset['context']
+        contextMask = dataset['contextMask']
+        contextLen = dataset['contextLen']
+        questionLen = dataset['questionLen']
+        span_start = dataset['spanStart']
+        span_end = dataset['spanEnd']
+        batch_size = FLAGS.batch_size
+        num_examples = len(question)
+        num_batches = int(num_examples / batch_size) + 1
+        for j in range(num_batches):
+            question_batch = question[j*batch_size:(j+1)*batch_size]
+            context_batch = context[j*batch_size:(j+1)*batch_size]
+            start_batch = span[j*batch_size:(j+1)*batch_size]
+            end_batch = span[j*batch_size:(j+1)*batch_size]
+            question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
+            context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
+            question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
+            context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
+            
+            loss_out = self.test(session, question_batch, context_batch, start_batch, end_batch,\
+                question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
+            valid_cost += loss_out
+        # for itr in range(len(valid_dataset)):
+        #     context = dataset['context'][itr]
+        #     span = dataset['span'][itr]
+        #     item = {key: dataset[key][itr] for key in dataset.keys()}
+        #     valid_cost += self.test(sess, item)
 
-        for item in valid_dataset:
-          valid_cost += self.test(sess, valid_x, valid_y)
-
-
-        return valid_cost
+        return valid_cost/float(num_batches)
 
     def evaluate_answer(self, session, dataset, vocab, sample=100, log=True):
         """
@@ -396,11 +432,19 @@ class QASystem(object):
 
         f1 = 0.
         em = 0.
-        for itr in np.random.randint(len(dataset.shape[0]), size=sample):
-            item = dataset[i]
-            start, end = answer(session, item)
-            ans = ' '.join([vocab[x] for x in item['context'][start:end+1] if x in vocab])
-            check = [' '.join([vocab[x] for x in lst]) for lst in item['span']]
+        for itr in np.random.randint(len(dataset['context']), size=sample):
+            context = dataset['context'][itr]
+            span = dataset['span'][itr]
+            item = {key: dataset[key][itr] for key in dataset.keys()}
+            start, end = self.answer(session, item)
+            start = start[0]
+            end = end[0]
+            ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
+            check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1]])
+            print('span', span)
+            print('startend', start, end)
+            print('ans', ans)
+            print('check', check)
             f1 += metric_max_over_ground_truths(f1_score, ans, check)
             em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
@@ -474,7 +518,9 @@ class QASystem(object):
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
         i = 1
-        for itr in range(100):
+        min_val = 10000000000000000
+        min_model_name="dummy"
+        for itr in range(10):
             for j in range(num_batches):
                 print('iter,', itr, 'j=', j)
                 question_batch = question[j*batch_size:(j+1)*batch_size]
@@ -486,12 +532,14 @@ class QASystem(object):
                 question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
                 context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
                 
-                loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
+                _, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
                     question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
                 i += 1
                 if i % 1000:
                     print("[Sample] loss_out: %.8f " % (loss_out))
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
+                    loss_val = self.validate(session, datasetVal)
+                    print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
 
             self.checkpoint_dir = "match_lstm"
             model_name = "match_lstm.model-epoch"
@@ -500,7 +548,10 @@ class QASystem(object):
 
             if not os.path.exists(checkpoint_dir):
                 os.makedirs(checkpoint_dir)
-
+            loss_val = self.validate(session, datasetVal)
+            if loss_val < min_val:
+                min_model_name = itr
+                print("New min model itr: " + str(itr))
             self.saver.save(self.sess,
                            os.path.join(checkpoint_dir, model_name),
                            global_step=itr)

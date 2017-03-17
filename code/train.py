@@ -93,7 +93,7 @@ def init_dataset(data_dir, val=False):
 
     dataset_dicts = {'question': [], 'questionMask': [], 'context': [],
                      'contextMask': [], 'spanStart': [], 'contextLen': [], 
-                     'questionLen': [], 'spanEnd': []}
+                     'questionLen': [], 'spanEnd': [], 'span' :[]}
 
     with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
         for line in qf:
@@ -130,6 +130,7 @@ def init_dataset(data_dir, val=False):
             end[span[1]] = 1
             dataset_dicts['spanStart'].append(st)
             dataset_dicts['spanEnd'].append(end)
+            dataset_dicts['span'].append(span)
             dataset_dicts['contextLen'].append(para_len)
             dataset_dicts['questionLen'].append(question_len)
 
