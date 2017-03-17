@@ -89,12 +89,12 @@ class Encoder(object):
 
     def give_attn_func(self, Hq, mask):
         def attn_func(inputs, state):
-            # print(Hq.get_shape()[1])
+            print(Hq.get_shape())
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,self.Wq)
             mid_st = tf.matmul(tf.reshape(tf.nn.tanh(\
-                tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
-                 + tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) + self.bp),\
+               tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
+                 + tf.tile(tf.rehape(tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) + self.bp, [-1, 1, self.size]),[1,int(Hq.get_shape()[1]),1])),\
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
             mid_st=tf.multiply(tf.to_float(mask), tf.exp(mid_st))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
