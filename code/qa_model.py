@@ -31,13 +31,13 @@ class Encoder(object):
         self.size = size
         self.vocab_dim = vocab_dim
 
-        with tf.variable_scope('p_enc'):
+        with tf.variable_scope('p_enc', initializer=tf.contrib.layers.xavier_initializer()):
             self.initial_p_encoder = tf.nn.rnn_cell.GRUCell(self.size)
-        with tf.variable_scope('q_enc'):
+        with tf.variable_scope('q_enc', initializer=tf.contrib.layers.xavier_initializer()):
             self.initial_q_encoder = tf.nn.rnn_cell.GRUCell(self.size)
-        with tf.variable_scope('mf_enc'):
-            self.match_encoder_f = tf.nn.rnn_cell.GRUCell(self.size)
-        with tf.variable_scope('mb_enc'):
+        #with tf.variable_scope('mf_enc', initializer=tf.contrib.layers.xavier_initializer()):
+        #    self.match_encoder_f = tf.nn.rnn_cell.GRUCell(self.size)
+        with tf.variable_scope('mb_enc', initializer=tf.contrib.layers.xavier_initializer()):
             self.match_encoder_b = tf.nn.rnn_cell.GRUCell(self.size)
         with tf.variable_scope("attn_func_encode", \
             initializer=tf.contrib.layers.xavier_initializer()):
@@ -85,8 +85,8 @@ class Encoder(object):
             inp = tf.concat(1, [inputs, attWeight])
             # print("inpot")
             # print(inp.get_shape())
-            output, new_state = self.GRUCell(inp, state)
-            # output = new_state
+            _, new_state = self.GRUCell(inp, state)
+            output = new_state
             return output, new_state
 
     def give_attn_func(self, Hq, mask):
@@ -116,20 +116,21 @@ class Encoder(object):
         return lambda x, y: attn_func(x, y) 
 
     def encode(self, paragraph, question, masks, question_len, paragraph_len):
-        with tf.variable_scope('p_enc'):
+        with tf.variable_scope('p_enc', initializer=tf.contrib.layers.xavier_initializer()):
             para_stat, _ = tf.nn.dynamic_rnn(self.initial_p_encoder, paragraph,\
                 sequence_length=paragraph_len, dtype=tf.float32)
-        with tf.variable_scope('q_enc'):
+        with tf.variable_scope('q_enc', initializer=tf.contrib.layers.xavier_initializer()):
             q_stat, _ = tf.nn.dynamic_rnn(self.initial_q_encoder, question,\
             sequence_length=question_len, dtype=tf.float32)
         attn_func = self.give_attn_func(q_stat, masks)
         # print("GEEE")
-        with tf.variable_scope('mf_enc'):
-            forward = \
-            self.MatchGRUCell(self.size, attn_func, self.match_encoder_f)
-        with tf.variable_scope('mb_enc'):
+        #with tf.variable_scope('mf_enc', initializer=tf.contrib.layers.xavier_initializer()):
+        #    forward = \
+        #    self.MatchGRUCell(self.size, attn_func, self.match_encoder_f)
+        with tf.variable_scope('mb_enc', initializer=tf.contrib.layers.xavier_initializer()):
             backward = \
             self.MatchGRUCell(self.size, attn_func, self.match_encoder_b)
+            forward = backward
         # print("Para")        
         # print(para_stat.get_shape())
         # print("Lala")        
@@ -184,13 +185,13 @@ class Decoder(object):
             # print(attention_mat.get_shape())
         with tf.variable_scope("attn_func_decode_end", \
             initializer=tf.contrib.layers.xavier_initializer()):
-            V = tf.get_variable("V", (2*self.size, self.size))
+            #V = tf.get_variable("V", (2*self.size, self.size))
             Wp = tf.get_variable("W_a", (2*self.size, self.size))
-            ba = tf.get_variable("b_a", (self.size,),\
-             initializer=tf.constant_initializer(0))
-            v = tf.get_variable("v_att", (self.size, 1))
-            c = tf.get_variable("c", (1,),\
-                    initializer=tf.constant_initializer(0))
+            #ba = tf.get_variable("b_a", (self.size,),\
+            # initializer=tf.constant_initializer(0))
+            #v = tf.get_variable("v_att", (self.size, 1))
+            #c = tf.get_variable("c", (1,),\
+            #        initializer=tf.constant_initializer(0))
             Hq = knowledge_rep
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,V)
@@ -227,12 +228,12 @@ class QASystem(object):
         self.question_len = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
         self.pretrained_embeddings = np.load(embed_path)['glove']
-        self.label_start_placeholder = tf.placeholder(tf.float32)
-        self.label_end_placeholder = tf.placeholder(tf.float32)
+        self.label_start_placeholder = tf.placeholder(tf.int32)
+        self.label_end_placeholder = tf.placeholder(tf.int32)
         self.vocab_dim = encoder.vocab_dim
 
         # ==== assemble pieces ====
-        # with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
+        #with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
         with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
             self.setup_embeddings()
             self.setup_system(encoder, decoder)
@@ -266,6 +267,8 @@ class QASystem(object):
         , self.question_mask, self.question_len, self.paragraph_len)
         self.start_token_score, self.end_token_score = decoder.decode(knowledge_rep,\
             self.paragraph_mask)
+        self.start_token_score = tf.Print(self.start_token_score, [self.start_token_score], "scoreS")
+        self.end_token_score = tf.Print(self.end_token_score, [self.end_token_score], "scoreE")
         # raise NotImplementedError("Connect all parts of your system here!")
 
 
@@ -275,15 +278,21 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.start_token_score))
-            mid_st=tf.multiply(self.label_start_placeholder,\
-                tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
-            loss = tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
-            mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.end_token_score))
-            mid_st=tf.multiply(self.label_end_placeholder,\
-                tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
-            loss += tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
-            return -loss
+            mask = tf.log(tf.to_float(self.paragraph_mask))
+            loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(mask + self.start_token_score, self.label_start_placeholder))
+            loss += tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(mask + self.end_token_score, self.label_end_placeholder))
+            return loss
+            #mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.start_token_score))
+            #mid_st=tf.Print(mid_st, [mid_st], "midS")
+            #mid_st=tf.multiply(self.label_start_placeholder,\
+            #    tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
+            #loss = tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
+            #mid_st=tf.multiply(tf.to_float(self.paragraph_mask), tf.exp(self.end_token_score))
+            #mid_st=tf.Print(mid_st, [mid_st], "midE")
+            #mid_st=tf.multiply(self.label_end_placeholder,\
+            #    tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
+            #loss += tf.reduce_mean(tf.reduce_sum(mid_st, axis = 1))
+            #return -loss
             # loss1 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, )
             # loss2 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score)
             # loss1 = tf.multiply(loss1, tf.to_float(self.mask_placeholder))
@@ -300,10 +309,10 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("embeddings"):
-            para_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32)
+            para_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=False)
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
-            ques_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32)
+            ques_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=False)
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
             # pass
@@ -415,14 +424,15 @@ class QASystem(object):
         questionLen = dataset['questionLen']
         span_start = dataset['spanStart']
         span_end = dataset['spanEnd']
+        span = np.array(dataset['span'])
         batch_size = FLAGS.batch_size
         num_examples = len(question)
         num_batches = int(num_examples / batch_size) + 1
         for j in range(num_batches):
             question_batch = question[j*batch_size:(j+1)*batch_size]
             context_batch = context[j*batch_size:(j+1)*batch_size]
-            start_batch = span_start[j*batch_size:(j+1)*batch_size]
-            end_batch = span_end[j*batch_size:(j+1)*batch_size]
+            start_batch = span[j*batch_size:(j+1)*batch_size, 0]
+            end_batch = span[j*batch_size:(j+1)*batch_size, 1]
             question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
             context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
             question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
@@ -430,7 +440,7 @@ class QASystem(object):
 
             loss_out = self.test(session, question_batch, context_batch, start_batch, end_batch,\
                 question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
-            # print(loss_out)
+            #print(loss_out)
             valid_cost += loss_out[0]
         # for itr in range(len(valid_dataset)):
         #     context = dataset['context'][itr]
@@ -440,7 +450,7 @@ class QASystem(object):
 
         return valid_cost/float(num_batches)
 
-    def evaluate_answer(self, session, dataset, vocab, sample=10, log=True):
+    def evaluate_answer(self, session, dataset, vocab, sample=100, log=True):
         """
         Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
         with the set of true answer labels
@@ -484,10 +494,10 @@ class QASystem(object):
             end = end[0]
             ans = ' '.join([vocab[x] for x in context[start:end+1] if x < len(vocab)])
             check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1] if x < len(vocab)])
-            # print('span', span)
-            # print('startend', start, end)
-            # print('ans', ans)
-            # print('check', check)
+            #print('span', span)
+            #print('startend', start, end)
+            #print('ans', ans)
+            #print('check', check)
             f1 += f1_score(ans, check)
             em += int(exact_match_score(ans, check))
         f1 = f1 / float(sample)
@@ -548,7 +558,7 @@ class QASystem(object):
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
-        #self.load(session, checkpoint_dir)
+        self.load(session, checkpoint_dir)
         #self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=0)
         
 
@@ -561,7 +571,7 @@ class QASystem(object):
         questionLen = dataset['questionLen']
         span_start = dataset['spanStart']
         span_end = dataset['spanEnd']
-
+        span = np.array(dataset['span'])
         batch_size = FLAGS.batch_size
         num_examples = len(question)
         num_batches = int(num_examples / batch_size) + 1
@@ -571,7 +581,7 @@ class QASystem(object):
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
-
+        itr2 = 0
         i = 0
         min_val = 10000000000000000
         min_model_name="dummy"
@@ -581,8 +591,8 @@ class QASystem(object):
                 print('iter,', itr, 'j=', j)
                 question_batch = question[j*batch_size:(j+1)*batch_size]
                 context_batch = context[j*batch_size:(j+1)*batch_size]
-                start_batch = span_start[j*batch_size:(j+1)*batch_size]
-                end_batch = span_end[j*batch_size:(j+1)*batch_size]
+                start_batch = span[j*batch_size:(j+1)*batch_size, 0]
+                end_batch = span[j*batch_size:(j+1)*batch_size, 1]
                 question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
                 context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
                 question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
@@ -596,10 +606,15 @@ class QASystem(object):
                 print("time")
                 print(toc-tic)
                 if i % FLAGS.print_every == 0:
+                    model_name = "test_match.model-epoch"
+                    self.saver.save(session, os.path.join(checkpoint_dir, model_name), global_step=itr2)
                     #print(rev_vocab)
+                    itr2 += 1
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
-                    loss_val = self.validate(session, datasetVal)
-                    print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
+                    #loss_val = self.validate(session, datasetVal)
+                    print("[Sample Validate] F1: %.8f, EM: %.8f " % (f1, em))
+                    #f1, em = self.evaluate_answer(session, dataset, rev_vocab)
+                    #print("[Sample Train] F1: %.8f, EM: %.8f " % (f1, em))
                 i += 1
 
             # self.checkpoint_dir = FLAGS.train_dir
@@ -607,10 +622,10 @@ class QASystem(object):
             #model_dir = "squad_%s" % (FLAGS.batch_size)
             #checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
 
-            if not os.path.exists(checkpoint_dir):
-                os.makedirs(checkpoint_dir)
+
             loss_val = self.validate(session, datasetVal)
             if loss_val < min_val:
                 min_model_name = itr
                 print("New min model itr: " + str(itr))
-            self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=itr)
+            self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=itr2)
+            itr2 += 1

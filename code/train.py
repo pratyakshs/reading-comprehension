@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 20, "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("batch_size", 80, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 10, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 150, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 2, "The output size of your model.")
@@ -99,7 +99,7 @@ def init_dataset(data_dir, val=False):
         for line in qf:
             question = [int(word) for word in line.strip().split()]
             context = [int(word) for word in cf.next().strip().split()]
-            span = [int(word) for word in sf.next().strip().split()]
+            span = [min(int(word), FLAGS.para_size) for word in sf.next().strip().split()]
 
             # do question padding
             question_len = len(question)
@@ -161,10 +161,10 @@ def main(_):
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    gpu_options = tf.GPUOptions(allow_growth=True)
+    # gpu_options = tf.GPUOptions(allow_growth=True)
     #config=tf.ConfigProto(gpu_options=gpu_options\
     #  , allow_soft_placement=True)
-    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+    with tf.Session() as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
 
