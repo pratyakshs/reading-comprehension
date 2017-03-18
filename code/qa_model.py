@@ -394,7 +394,7 @@ class QASystem(object):
 
         return (a_s, a_e)
 
-    def validate(self, sess, dataset):
+    def validate(self, session, dataset):
         """
         Iterate through the validation dataset and determine what
         the validation cost is.
@@ -421,16 +421,17 @@ class QASystem(object):
         for j in range(num_batches):
             question_batch = question[j*batch_size:(j+1)*batch_size]
             context_batch = context[j*batch_size:(j+1)*batch_size]
-            start_batch = span[j*batch_size:(j+1)*batch_size]
-            end_batch = span[j*batch_size:(j+1)*batch_size]
+            start_batch = span_start[j*batch_size:(j+1)*batch_size]
+            end_batch = span_end[j*batch_size:(j+1)*batch_size]
             question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
             context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
             question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
             context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
-            
+
             loss_out = self.test(session, question_batch, context_batch, start_batch, end_batch,\
                 question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
-            valid_cost += loss_out
+            # print(loss_out)
+            valid_cost += loss_out[0]
         # for itr in range(len(valid_dataset)):
         #     context = dataset['context'][itr]
         #     span = dataset['span'][itr]
@@ -439,7 +440,7 @@ class QASystem(object):
 
         return valid_cost/float(num_batches)
 
-    def evaluate_answer(self, session, dataset, vocab, sample=100, log=True):
+    def evaluate_answer(self, session, dataset, vocab, sample=10, log=True):
         """
         Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
         with the set of true answer labels
@@ -454,24 +455,43 @@ class QASystem(object):
         :param log: whether we print to std out stream
         :return:
         """
-
+        # question_batch = [None for x in range(sample)]
+        # context_batch = [None for x in range(sample)]
+        # start_batch = [None for x in range(sample)]
+        # end_batch = span_end[j*batch_size:(j+1)*batch_size]
+        # question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
+        # context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
+        # question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
+        # context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
+        # for itr in np.random.randint(len(dataset['context']), size=sample):
+        #     question_batch = question[j*batch_size:(j+1)*batch_size]
+        #     context_batch = context[j*batch_size:(j+1)*batch_size]
+        #     start_batch = span_start[j*batch_size:(j+1)*batch_size]
+        #     end_batch = span_end[j*batch_size:(j+1)*batch_size]
+        #     question_mask_batch = questionMask[j*batch_size:(j+1)*batch_size]
+        #     context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
+        #     question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
+        #     context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
         f1 = 0.
         em = 0.
         for itr in np.random.randint(len(dataset['context']), size=sample):
+
             context = dataset['context'][itr]
             span = dataset['span'][itr]
             item = {key: dataset[key][itr] for key in dataset.keys()}
             start, end = self.answer(session, item)
             start = start[0]
             end = end[0]
-            ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
-            check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1]])
+            ans = ' '.join([vocab[x] for x in context[start:end+1] if x < len(vocab)])
+            check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1] if x < len(vocab)])
             # print('span', span)
             # print('startend', start, end)
             # print('ans', ans)
             # print('check', check)
-            f1 += metric_max_over_ground_truths(f1_score, ans, check)
-            em += metric_max_over_ground_truths(exact_match_score, ans, check)
+            f1 += f1_score(ans, check)
+            em += int(exact_match_score(ans, check))
+        f1 = f1 / float(sample)
+        em = em / float(sample)
         if log:
             logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
@@ -481,8 +501,8 @@ class QASystem(object):
         print(" [*] Reading checkpoints...")
 
         model_name = "match_lstm.model-epoch"
-        model_dir = "squad_%s" % (FLAGS.batch_size)
-        checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
+        # model_dir = "squad_%s" % (FLAGS.batch_size)
+        # checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
@@ -524,7 +544,7 @@ class QASystem(object):
         # so that you can use your trained model to make predictions, or
         # even continue training
         checkpoint_dir = FLAGS.train_dir
-	model_name = "match_lstm.model-epoch"
+        model_name = "match_lstm.model-epoch"
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
@@ -571,14 +591,16 @@ class QASystem(object):
                 _, grad_norm, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
                     question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
                 print("[Sample] loss_out: %.8f , norm: %.8f" % (loss_out, grad_norm))
-                i += 1
+
                 toc=time.time()
                 print("time")
                 print(toc-tic)
                 if i % FLAGS.print_every == 0:
+                    #print(rev_vocab)
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
                     loss_val = self.validate(session, datasetVal)
                     print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
+                i += 1
 
             # self.checkpoint_dir = FLAGS.train_dir
             model_name = "match_lstm.model-epoch"
@@ -591,4 +613,4 @@ class QASystem(object):
             if loss_val < min_val:
                 min_model_name = itr
                 print("New min model itr: " + str(itr))
-            self.saver.save(self.sess, os.path.join(checkpoint_dir, model_name),global_step=itr)
+            self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=itr)
