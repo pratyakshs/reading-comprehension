@@ -427,9 +427,10 @@ class QASystem(object):
         contextMask = dataset['contextMask']
         contextLen = dataset['contextLen']
         questionLen = dataset['questionLen']
-        span_start = dataset['spanStart']
-        span_end = dataset['spanEnd']
+        #span_start = dataset['spanStart']
+        #span_end = dataset['spanEnd']
         span = np.array(dataset['span'])
+        #span_exact = np.array(dataset['span_exact'])
         batch_size = FLAGS.batch_size
         num_examples = len(question)
         num_batches = int(num_examples / batch_size) + 1
@@ -492,7 +493,7 @@ class QASystem(object):
         for itr in np.random.randint(len(dataset['context']), size=sample):
 
             context = dataset['context'][itr]
-            span = dataset['span'][itr]
+            span = dataset['span_exact'][itr]
             item = {key: dataset[key][itr] for key in dataset.keys()}
             start, end = self.answer(session, item)
             start = start[0]
@@ -574,8 +575,8 @@ class QASystem(object):
         contextMask = dataset['contextMask']
         contextLen = dataset['contextLen']
         questionLen = dataset['questionLen']
-        span_start = dataset['spanStart']
-        span_end = dataset['spanEnd']
+        #span_start = dataset['spanStart']
+        #span_end = dataset['spanEnd']
         span = np.array(dataset['span'])
         batch_size = FLAGS.batch_size
         num_examples = len(question)
@@ -621,8 +622,8 @@ class QASystem(object):
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
                     #loss_val = self.validate(session, datasetVal)
                     print("[Sample Validate] F1: %.8f, EM: %.8f " % (f1, em))
-                    #f1, em = self.evaluate_answer(session, dataset, rev_vocab)
-                    #print("[Sample Train] F1: %.8f, EM: %.8f " % (f1, em))
+                    f1, em = self.evaluate_answer(session, dataset, rev_vocab)
+                    print("[Sample Train] F1: %.8f, EM: %.8f " % (f1, em))
                 i += 1
 
             # self.checkpoint_dir = FLAGS.train_dir

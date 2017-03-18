@@ -35,7 +35,7 @@ tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embeddin
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
 # tf.app.flags.DEFINE_string("checkpoint_dir", "match_gru", "Directory to save match_gru (def: match_gru)")
-tf.app.flags.DEFINE_integer("trainable", 1, "training embed?")
+tf.app.flags.DEFINE_integer("trainable", 0, "training embed?")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -93,14 +93,15 @@ def init_dataset(data_dir, val=False):
         sfile = pjoin(data_dir, 'train.span')
 
     dataset_dicts = {'question': [], 'questionMask': [], 'context': [],
-                     'contextMask': [], 'spanStart': [], 'contextLen': [], 
-                     'questionLen': [], 'spanEnd': [], 'span' :[]}
+                     'contextMask': [], 'contextLen': [], 
+                     'questionLen': [], 'span_exact':[], 'span' :[]}
 
     with open(qfile, 'rb') as qf, open(cfile, 'rb') as cf, open(sfile, 'rb') as sf:
         for line in qf:
             question = [int(word) for word in line.strip().split()]
             context = [int(word) for word in cf.next().strip().split()]
-            span = [min(int(word), FLAGS.para_size) for word in sf.next().strip().split()]
+            span = [int(word) for word in sf.next().strip().split()]
+            span_min = [min(x, FLAGS.para_size - 1) for x in span]
 
             # do question padding
             question_len = len(question)
@@ -125,13 +126,14 @@ def init_dataset(data_dir, val=False):
             dataset_dicts['questionMask'].append(q_mask)
             dataset_dicts['context'].append(context)
             dataset_dicts['contextMask'].append(c_mask)
-            st = [0 for x in range(FLAGS.para_size)]
-            st[span[0]] = 1
-            end = [0 for x in range(FLAGS.para_size)]
-            end[span[1]] = 1
-            dataset_dicts['spanStart'].append(st)
-            dataset_dicts['spanEnd'].append(end)
-            dataset_dicts['span'].append(span)
+            #st = [0 for x in range(FLAGS.para_size)]
+            #st[min(span[0], self.para_size)] = 1
+            #end = [0 for x in range(FLAGS.para_size)]
+            #end[min(span[1], self.para_size)] = 1
+            #dataset_dicts['spanStart'].append(st)
+            #dataset_dicts['spanEnd'].append(end)
+            dataset_dicts['span_exact'].append(span)
+            dataset_dicts['span'].append(span_min)
             dataset_dicts['contextLen'].append(para_len)
             dataset_dicts['questionLen'].append(question_len)
 
