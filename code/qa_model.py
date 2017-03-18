@@ -69,7 +69,7 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     if name is not None: w_name += name
     weights = vs.get_variable(
         w_name, [output_size, m], dtype=dtype)
-    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args)
+    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
     if not bias:
       return res
     with vs.variable_scope(outer_scope) as inner_scope:
@@ -80,7 +80,7 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
           b_name, [output_size, n],
           dtype=dtype,
           initializer=init_ops.constant_initializer(bias_start, dtype=dtype))
-  return tf.map_fn(lambda x: math_ops.add(x, biases), res)
+  return tf.map_fn(lambda x: math_ops.add(x, biases), res, parallel_iterations=100)
 
 
 class Encoder(object):
@@ -95,23 +95,24 @@ class Encoder(object):
 
         with tf.variable_scope('paragraph_encoder'):
             para, _ = tf.nn.dynamic_rnn(lstm_enc, paragraph, dtype=tf.float32)
+            # para_print = tf.Print(para, [para], 'yoooooo')
             # append sentinel
             fn = lambda x: tf.concat(
                 0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
-            para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32)
+            para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32, parallel_iterations=100)
             r, s, t = para_encoding.get_shape()
-            tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, self.size])
+            # tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, self.size])
 
         with tf.variable_scope('question_encoder'):
             ques, _ = tf.nn.dynamic_rnn(lstm_enc, question, dtype=tf.float32)
             # append sentinel
             fn = lambda x: tf.concat(
                 0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
-            ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32)
+            ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32, parallel_iterations=100)
             ques_encoding = tf.tanh(batch_linear(ques_encoding, FLAGS.question_size+1, True))
             ques_variation = tf.transpose(ques_encoding, perm=[0, 2, 1])
             r, s, t = ques_variation.get_shape()
-            tf.assert_equal([s.value, t.value], [FLAGS.question_size+1, self.size])
+            # tf.assert_equal([s.value, t.value], [FLAGS.question_size+1, self.size])
 
         with tf.variable_scope('coattention'):
             # compute affinity matrix, (batch_size, context+1, question+1)
@@ -119,9 +120,9 @@ class Encoder(object):
             # shape = (batch_size, question+1, context+1)
             L_t = tf.transpose(L, perm=[0, 2, 1])
             # normalize with respect to question
-            a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32)
+            a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32, parallel_iterations=100)
             # normalize with respect to context
-            a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32)
+            a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32, parallel_iterations=100)
             # summaries with respect to question, (batch_size, question+1, hidden_size)
             c_q = tf.batch_matmul(a_q, para_encoding)
             c_q_emb = tf.concat(1, [ques_variation, tf.transpose(c_q, perm=[0, 2 ,1])])
@@ -130,7 +131,7 @@ class Encoder(object):
             # final coattention context, (batch_size, context+1, 3*hidden_size)
             co_att = tf.concat(2, [para_encoding, tf.transpose(c_d, perm=[0, 2, 1])])
             r, s, t = co_att.get_shape()
-            tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, 3*self.size])
+            # tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, 3*self.size])
 
 
         with tf.variable_scope('encoder'):
@@ -144,7 +145,7 @@ class Encoder(object):
                 dtype=tf.float32)
             self._u = tf.concat(2, u)
             r, s, t = self._u.get_shape()
-            tf.assert_equal([s.value, t.value], [2*self.size, FLAGS.para_size])
+            # tf.assert_equal([s.value, t.value], [2*self.size, FLAGS.para_size])
         return self._u
 
 
@@ -154,6 +155,15 @@ class Decoder(object):
 
 
     def _select(self, u, pos, idx):
+        # tf.Print(u, [u])
+        # tf.Print(pos, [pos])
+        # tf.Print(idx, [idx])
+        # print('yoooo u.shape', u.get_shape())
+        # print('pos.shape', pos.get_shape())
+        # print('idx.shape', idx.get_shape())
+        # u = tf.Print(u, [u.get_shape()], 'u')
+        pos = tf.Print(pos, [pos, pos.get_shape(), idx, idx.get_shape(), u.get_shape()], 'pos-idx-u')
+        # idx = tf.Print(idx, [idx, idx.get_shape()], 'idx')
         u_idx = tf.gather(u, idx)
         pos_idx = tf.gather(pos, idx)
         return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
@@ -250,6 +260,7 @@ class Decoder(object):
         max_timesteps = FLAGS.para_size
         max_decode_steps = FLAGS.max_decode_steps
 
+        # print('knowledge_rep dim', knowledge_rep.get_shape())
         with tf.variable_scope('selector'):
             # LSTM for decoding
             lstm_dec = tf.nn.rnn_cell.LSTMCell(hidden_size)
@@ -258,19 +269,24 @@ class Decoder(object):
             highway_beta = self.highway_maxout(hidden_size, maxout_size)
             # reshape knowledge_rep, (context, batch_size, 2*hidden_size)
             U = tf.transpose(knowledge_rep[:,:max_timesteps,:], perm=[1, 0, 2])
+            # print('U dim', U.get_shape())
             r, s, t = U.get_shape()
-            tf.assert_equal([r.value, t.value], [FLAGS.para_size, 2*FLAGS.state_size])
+            # tf.assert_equal([r.value, t.value], [FLAGS.para_size, 2*FLAGS.state_size])
             # batch indices
             loop_until = tf.to_int32(np.array(range(batch_size)))
+            # print('loop_until dim', loop_until.get_shape())
+            # print('loop_until:', loop_until)
             # initial estimated positions
-            s, e = tf.split(0, 2, [0, 1])
-
+            s, e = tf.split(0, 2, np.array([[0, 1] * batch_size]).T)
+            s = tf.Print(s, [s, s.get_shape()], 's = ')
+            e = tf.Print(e, [e, e.get_shape()], 'e = ')
+            # print('s = ', s)
             fn = lambda idx: self._select(knowledge_rep, s, idx)
-            u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
-
+            u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+            # print('u_s shape', u_s.get_shape())
             fn = lambda idx: self._select(knowledge_rep, e, idx)
-            u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
-
+            u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+            # print('u_e shape', u_e.get_shape())
 
         self._s, self._e = [], []
         self._alpha, self._beta = [], []
@@ -279,32 +295,40 @@ class Decoder(object):
                 if step > 0: vs.reuse_variables()
                 # single step lstm
                 _input = tf.concat(1, [u_s, u_e])
+                # print('_input shape', _input.get_shape())
                 _, h = tf.nn.rnn(lstm_dec, [_input], dtype=tf.float32)
                 h_state = tf.concat(1, h)
+                # print('h_state shape', h_state.get_shape())
                 with tf.variable_scope('highway_alpha'):
                     # compute start position first
                     fn = lambda u_t: highway_alpha(u_t, h_state, u_s, u_e)
-                    alpha = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32)
+                    alpha = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32, parallel_iterations=100)
+                    # print('alpha shape', alpha.get_shape())
                     s = tf.reshape(tf.argmax(alpha, 0), [batch_size])
+                    # print('s shape', s.get_shape())
                     # update start guess
                     fn = lambda idx: self._select(knowledge_rep, s, idx)
-                    u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+                    u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+                    # print('u_s shape', u_s.get_shape())
                 with tf.variable_scope('highway_beta'):
                     # compute end position next
                     fn = lambda u_t: highway_beta(u_t, h_state, u_s, u_e)
-                    beta = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32)
+                    beta = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32, parallel_iterations=100)
                     e = tf.reshape(tf.argmax(beta, 0), [batch_size])
                     # update end guess
                     fn = lambda idx: self._select(knowledge_rep, e, idx)
-                    u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32)
+                    u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
 
                 self._s.append(s)
                 self._e.append(e)
                 self._alpha.append(tf.reshape(alpha, [batch_size, -1]))
                 self._beta.append(tf.reshape(beta, [batch_size, -1]))
+                # print('self._alpha', self._alpha[-1])
+                # print('self._beta', self._beta[-1])
+
 
         r, s = self._alpha[-1].get_shape()
-        tf.assert_equal([s.value], [FLAGS.para_size])
+        # tf.assert_equal([s.value], [FLAGS.para_size])
         return self._alpha[-1], self._beta[-1]
 
 class QASystem(object):
@@ -325,7 +349,7 @@ class QASystem(object):
         self.paragraph = tf.placeholder(tf.int32)
         self.question = tf.placeholder(tf.int32)
         # self.dropout_placeholder = tf.placeholder(tf.float32)
-        self.pretrained_embeddings = tf.Variable(np.load(embed_path)['glove'], dtype=tf.float32)
+        self.pretrained_embeddings = np.array(np.load(embed_path)['glove'], dtype=np.float32)
         self.label_start_placeholder = tf.placeholder(tf.int32)
         self.label_end_placeholder = tf.placeholder(tf.int32)
         self.vocab_dim = encoder.vocab_dim
@@ -360,8 +384,8 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            print(self.label_start_placeholder.get_shape(), 'yoooo')
-            print(self.start_token_score.get_shape(), 'maaan')
+            # print(self.label_start_placeholder.get_shape(), 'yoooo')
+            # print(self.start_token_score.get_shape(), 'maaan')
             loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.label_start_placeholder, logits=self.start_token_score))
             loss += tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.label_end_placeholder, logits=self.end_token_score))
             return loss
@@ -377,10 +401,10 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("embeddings"):
-            para_embedding_list = tf.Variable(self.pretrained_embeddings)
+            para_embedding_list = tf.Variable(self.pretrained_embeddings, trainable=False)
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
-            ques_embedding_list = tf.Variable(self.pretrained_embeddings)
+            ques_embedding_list = tf.Variable(self.pretrained_embeddings, trainable=False)
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
             # pass
@@ -498,10 +522,10 @@ class QASystem(object):
             end = end[0]
             ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
             check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1]])
-            print('span', span)
-            print('startend', start, end)
-            print('ans', ans)
-            print('check', check)
+            # print('span', span)
+            # print('startend', start, end)
+            # print('ans', ans)
+            # print('check', check)
             f1 += metric_max_over_ground_truths(f1_score, ans, check)
             em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
@@ -553,13 +577,17 @@ class QASystem(object):
         for itr in range(100):
             for j in range(num_batches):
                 print('iter,', itr, 'j=', j)
+                tic = time.time()
                 question_batch = question[j*batch_size:(j+1)*batch_size]
                 context_batch = context[j*batch_size:(j+1)*batch_size]
                 start_batch = span[j*batch_size:(j+1)*batch_size,0]
                 end_batch = span[j*batch_size:(j+1)*batch_size,1]
                 loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch)
                 i += 1
-                if i % 1000 == 0:
+                toc = time.time()
+                print('Iteration took', toc - tic, 'seconds for batch_size=', batch_size)
+                print((toc - tic) * 1./ batch_size, 'seconds per training example')
+                if i % (1000 / batch_size) == 0:
                     print("[Sample] loss_out:", (loss_out))
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
 
