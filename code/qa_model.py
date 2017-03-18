@@ -270,7 +270,7 @@ class QASystem(object):
             mid_st=tf.multiply(self.label_end_placeholder,\
                 tf.log(mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)))
             loss += tf.reduce_mean(tf.reduce_sum(mid_st, axis=1))
-            return loss
+            return -loss
             # loss1 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_start_placeholder, )
             # loss2 = tf.nn.sigmoid_cross_entropy_with_logits(self.label_end_placeholder, self.end_token_score)
             # loss1 = tf.multiply(loss1, tf.to_float(self.mask_placeholder))
