@@ -548,7 +548,7 @@ class QASystem(object):
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
-        self.load(session, checkpoint_dir)
+        #self.load(session, checkpoint_dir)
         #self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=0)
         
 
