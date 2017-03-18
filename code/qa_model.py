@@ -82,7 +82,8 @@ class Encoder(object):
             # print("inputs ")
             # print(inputs.get_shape())
             inp = tf.concat(1, [inputs, attWeight])
-            # print(inp.get_shape())
+            print("inpot")
+            print(inp.get_shape())
             output, new_state = self.GRUCell(inp, state)
             # output = new_state
             return output, new_state
@@ -92,18 +93,24 @@ class Encoder(object):
             print(Hq.get_shape())
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,self.Wq)
+            other_fac = tf.tile(tf.reshape(tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) \
+            + self.bp, [-1, 1, self.size]),[1,int(Hq.get_shape()[1]),1])
+            print(other_fac.get_shape())
+            print(temp.get_shape())
             mid_st = tf.matmul(tf.reshape(tf.nn.tanh(\
                tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
-                 + tf.tile(tf.rehape(tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) + self.bp, [-1, 1, self.size]),[1,int(Hq.get_shape()[1]),1])),\
+                 + other_fac),\
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
-            mid_st=tf.multiply(tf.to_float(mask), tf.exp(mid_st))
+            print("mid checkk")
+            print(mid_st.get_shape())
+            mid_st=tf.multiply(tf.to_float(mask), tf.exp(tf.reshape(mid_st, [-1, int(Hq.get_shape()[1])])))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             # tf.nn.softmax(tf.matmul(mid_st, self.w) + self.b)
-            print(mid_st)
             mid_st = tf.reshape(tf.batch_matmul(tf.reshape(mid_st,\
             [-1, 1,int(Hq.get_shape()[1])]), Hq),\
             [-1, int(Hq.get_shape()[2])])
-            # print(mid_st.get_shape())
+            print("asser")
+            print(mid_st.get_shape())
             return mid_st
         return lambda x, y: attn_func(x, y) 
 
@@ -122,8 +129,11 @@ class Encoder(object):
         with tf.variable_scope('mb_enc'):
             backward = \
             self.MatchGRUCell(self.size, attn_func, self.match_encoder_b)
+        print("Para")        
         print(para_stat.get_shape())
+        print("Lala")        
         print(paragraph.get_shape())
+        paragraph_len = tf.Print(paragraph_len, [paragraph_len])
         state, _ = tf.nn.bidirectional_dynamic_rnn(forward, backward, \
         para_stat, sequence_length=paragraph_len, dtype=tf.float32)
         state = tf.concat(2, state)
@@ -181,10 +191,12 @@ class Decoder(object):
             Hq = knowledge_rep
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,V)
+            other_fac = tf.tile(tf.reshape(tf.matmul(tf.reshape(attention_mat,\
+            [-1, 2*self.size]), Wp), [-1, 1, self.size]),\
+            [1,int(Hq.get_shape()[1]),1])
             self.end_logits = tf.reshape(tf.matmul(tf.reshape(tf.nn.tanh(\
             tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba +\
-            tf.matmul(tf.reshape(attention_mat,[-1, 2*self.size]), Wp)),\
-              [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
+            other_fac), [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
             print(self.end_logits.get_shape())
             
         return self.start_logits, self.end_logits
@@ -238,7 +250,7 @@ class QASystem(object):
         :return:
         """
         knowledge_rep = encoder.encode(self.para_embeddings, self.ques_embeddings\
-        , self.paragraph_mask, self.question_len, self.paragraph_len)
+        , self.question_mask, self.question_len, self.paragraph_len)
         self.start_token_score, self.end_token_score = decoder.decode(knowledge_rep,\
             self.paragraph_mask)
         # raise NotImplementedError("Connect all parts of your system here!")
@@ -334,7 +346,7 @@ class QASystem(object):
         return outputs
 
     def decode(self, session, question, paragraph, 
-        question_len, paragraph_mask, paragraph_len):
+        question_mask, question_len, paragraph_mask, paragraph_len):
         """
         Returns the probability distribution over different positions in the paragraph
         so that other methods like self.answer() will be able to work properly
@@ -342,11 +354,9 @@ class QASystem(object):
         """
         input_feed = {self.paragraph:paragraph,
         self.question:question,
-        self.label_start_placeholder:None,
-        self.label_end_placeholder:None,
         self.question_len: question_len,
         self.paragraph_mask: paragraph_mask,
-        self.question_mask: None,
+        self.question_mask: question_mask,
         self.paragraph_len: paragraph_len}
 
 
@@ -360,13 +370,14 @@ class QASystem(object):
         return outputs
 
     def answer(self, session, item):
-        paragraph = item['context']
-        question = item['question']
-        mask = np.array(item['contextMask'])
-        yp, yp2 = self.decode(session, paragraph, question, item['questionLen'],\
-         mask, item['contextLen'])
-        a_s = np.argmax(np.ma.masked_array(yp, ~mask), axis=1)
-        a_e = np.argmax(np.ma.masked_array(yp2, ~mask), axis=1)
+        paragraph = [item['context']]
+        question = [item['question']]
+        maskP = [item['contextMask']]
+        maskQ = [item['questionMask']]
+        yp, yp2 = self.decode(session, question, paragraph, maskQ,\
+         [item['questionLen']], maskP, [item['contextLen']])
+        a_s = np.argmax(np.ma.masked_array(yp, np.logical_not(maskP)), axis=1)
+        a_e = np.argmax(np.ma.masked_array(yp2, np.logical_not(maskP)), axis=1)
 
         return (a_s, a_e)
 
@@ -442,10 +453,10 @@ class QASystem(object):
             end = end[0]
             ans = ' '.join([vocab[x] for x in context[start:end+1] if x in vocab])
             check = ' '.join([vocab[x] for x in context[span[0]:span[1]+1]])
-            print('span', span)
-            print('startend', start, end)
-            print('ans', ans)
-            print('check', check)
+            # print('span', span)
+            # print('startend', start, end)
+            # print('ans', ans)
+            # print('check', check)
             f1 += metric_max_over_ground_truths(f1_score, ans, check)
             em += metric_max_over_ground_truths(exact_match_score, ans, check)
         if log:
@@ -518,11 +529,12 @@ class QASystem(object):
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
-        i = 1
+        i = 0
         min_val = 10000000000000000
         min_model_name="dummy"
-        for itr in range(10):
+        for itr in range(FLAGS.epochs):
             for j in range(num_batches):
+                tic =time.time()
                 print('iter,', itr, 'j=', j)
                 question_batch = question[j*batch_size:(j+1)*batch_size]
                 context_batch = context[j*batch_size:(j+1)*batch_size]
@@ -532,12 +544,16 @@ class QASystem(object):
                 context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
                 question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
                 context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
-                
-                _, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
+                print(context_len_batch)
+                x, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
                     question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
+                print("[Sample] loss_out: %.8f " % (loss_out))
+                print(x)
                 i += 1
-                if i % 1000:
-                    print("[Sample] loss_out: %.8f " % (loss_out))
+                toc=time.time()
+                print("time")
+                print(toc-tic)
+                if i % FLAGS.print_every == 0:
                     f1, em = self.evaluate_answer(session, datasetVal, rev_vocab)
                     loss_val = self.validate(session, datasetVal)
                     print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
