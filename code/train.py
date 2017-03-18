@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab 
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
-
+# tf.app.flags.DEFINE_string("checkpoint_dir", "match_gru", "Directory to save match_gru (def: match_gru)")
 
 
 FLAGS = tf.app.flags.FLAGS

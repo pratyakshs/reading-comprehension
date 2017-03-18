@@ -250,7 +250,7 @@ class QASystem(object):
         grad_var_list = [(grad, pair[1]) for grad ,pair in zip(grad_list, grad_var_list)]
         self.grad_norm = tf.global_norm([x[0] for x in grad_var_list])
         self.train_op = t_opt.apply_gradients(grad_var_list, global_step=global_step)
-
+        self.saver = tf.train.Saver(max_to_keep=1000)
         # self.train_op = t_opt.minimize(self.loss, global_step=global_step)
         
 
@@ -476,7 +476,7 @@ class QASystem(object):
 
         return f1, em
 
-    def load(self, checkpoint_dir):
+    def load(self, session, checkpoint_dir):
         print(" [*] Reading checkpoints...")
 
         model_name = "match_lstm.model-epoch"
@@ -486,7 +486,7 @@ class QASystem(object):
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-            self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
+            self.saver.restore(session, os.path.join(checkpoint_dir, ckpt_name))
             print(" [*] Success to read {}".format(ckpt_name))
             return True
         else:
@@ -522,6 +522,15 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
+        checkpoint_dir = FLAGS.train_dir
+        self.load(session, checkpoint_dir)
+        self.saver.save(self.sess, os.path.join(checkpoint_dir, model_name),global_step=itr)
+        model_name = "match_lstm.model-epoch"
+
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+
+
         question = dataset['question']
         questionMask = dataset['questionMask']
         context = dataset['context']
@@ -569,13 +578,13 @@ class QASystem(object):
                     loss_val = self.validate(session, datasetVal)
                     print("[Sample Validate] loss_out: %.8f, F1: %.8f, EM: %.8f " % (loss_val, f1, em))
 
-            self.checkpoint_dir = FLAGS.train_dir
+            # self.checkpoint_dir = FLAGS.train_dir
             model_name = "match_lstm.model-epoch"
             #model_dir = "squad_%s" % (FLAGS.batch_size)
             #checkpoint_dir = os.path.join(self.checkpoint_dir, model_dir)
 
             if not os.path.exists(checkpoint_dir):
-                os.makedirs(self.checkpoint_dir)
+                os.makedirs(checkpoint_dir)
             loss_val = self.validate(session, datasetVal)
             if loss_val < min_val:
                 min_model_name = itr
