@@ -82,35 +82,35 @@ class Encoder(object):
             # print("inputs ")
             # print(inputs.get_shape())
             inp = tf.concat(1, [inputs, attWeight])
-            print("inpot")
-            print(inp.get_shape())
+            # print("inpot")
+            # print(inp.get_shape())
             output, new_state = self.GRUCell(inp, state)
             # output = new_state
             return output, new_state
 
     def give_attn_func(self, Hq, mask):
         def attn_func(inputs, state):
-            print(Hq.get_shape())
+            # print(Hq.get_shape())
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,self.Wq)
             other_fac = tf.tile(tf.reshape(tf.matmul(state,self.Wm)+ tf.matmul(inputs, self.Wp) \
             + self.bp, [-1, 1, self.size]),[1,int(Hq.get_shape()[1]),1])
-            print(other_fac.get_shape())
-            print(temp.get_shape())
+            # print(other_fac.get_shape())
+            # print(temp.get_shape())
             mid_st = tf.matmul(tf.reshape(tf.nn.tanh(\
                tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size])\
                  + other_fac),\
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
-            print("mid checkk")
-            print(mid_st.get_shape())
+            # print("mid checkk")
+            # print(mid_st.get_shape())
             mid_st=tf.multiply(tf.to_float(mask), tf.exp(tf.reshape(mid_st, [-1, int(Hq.get_shape()[1])])))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             # tf.nn.softmax(tf.matmul(mid_st, self.w) + self.b)
             mid_st = tf.reshape(tf.batch_matmul(tf.reshape(mid_st,\
             [-1, 1,int(Hq.get_shape()[1])]), Hq),\
             [-1, int(Hq.get_shape()[2])])
-            print("asser")
-            print(mid_st.get_shape())
+            # print("asser")
+            # print(mid_st.get_shape())
             return mid_st
         return lambda x, y: attn_func(x, y) 
 
@@ -122,22 +122,22 @@ class Encoder(object):
             q_stat, _ = tf.nn.dynamic_rnn(self.initial_q_encoder, question,\
             sequence_length=question_len, dtype=tf.float32)
         attn_func = self.give_attn_func(q_stat, masks)
-        print("GEEE")
+        # print("GEEE")
         with tf.variable_scope('mf_enc'):
             forward = \
             self.MatchGRUCell(self.size, attn_func, self.match_encoder_f)
         with tf.variable_scope('mb_enc'):
             backward = \
             self.MatchGRUCell(self.size, attn_func, self.match_encoder_b)
-        print("Para")        
-        print(para_stat.get_shape())
-        print("Lala")        
-        print(paragraph.get_shape())
-        paragraph_len = tf.Print(paragraph_len, [paragraph_len])
+        # print("Para")        
+        # print(para_stat.get_shape())
+        # print("Lala")        
+        # print(paragraph.get_shape())
+        # paragraph_len = tf.Print(paragraph_len, [paragraph_len])
         state, _ = tf.nn.bidirectional_dynamic_rnn(forward, backward, \
         para_stat, sequence_length=paragraph_len, dtype=tf.float32)
         state = tf.concat(2, state)
-        print(state.get_shape())
+        # print(state.get_shape())
         return state
 
 
@@ -170,15 +170,17 @@ class Decoder(object):
             Hq = knowledge_rep
             res = tf.reshape(Hq,[-1,int(Hq.get_shape()[2])])
             temp = tf.matmul(res,V)
-            self.start_logits = tf.reshape(tf.matmul(tf.reshape(tf.nn.tanh(\
-            tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba),\
-              [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
-            print(self.start_logits.get_shape())
+            # self.start_logits = tf.reshape(tf.matmul(tf.reshape(tf.nn.tanh(\
+            # tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba),\
+            #   [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
+            self.start_logits = tf.reshape(tf.matmul(tf.nn.tanh(\
+            temp + ba), v) + c, [-1, int(Hq.get_shape()[1])])
+            # print(self.start_logits.get_shape())
             mid_st=tf.multiply(tf.to_float(mask), tf.exp(self.start_logits))
             mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             attention_mat = tf.batch_matmul(tf.reshape(tf.nn.softmax(\
             mid_st),[-1, 1, int(Hq.get_shape()[1])]), Hq)
-            print(attention_mat.get_shape())
+            # print(attention_mat.get_shape())
         with tf.variable_scope("attn_func_decode_end", \
             initializer=tf.contrib.layers.xavier_initializer()):
             V = tf.get_variable("V", (2*self.size, self.size))
@@ -197,7 +199,7 @@ class Decoder(object):
             self.end_logits = tf.reshape(tf.matmul(tf.reshape(tf.nn.tanh(\
             tf.reshape(temp, [-1, int(Hq.get_shape()[1]),self.size]) + ba +\
             other_fac), [-1,self.size]), v) + c, [-1, int(Hq.get_shape()[1])])
-            print(self.end_logits.get_shape())
+            # print(self.end_logits.get_shape())
             
         return self.start_logits, self.end_logits
 
@@ -229,7 +231,8 @@ class QASystem(object):
         self.vocab_dim = encoder.vocab_dim
 
         # ==== assemble pieces ====
-        with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
+        # with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
+        with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
             self.setup_embeddings()
             self.setup_system(encoder, decoder)
             self.loss = self.setup_loss()
@@ -239,7 +242,16 @@ class QASystem(object):
         global_step = tf.Variable(0, trainable=False)
         learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
         t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
-        self.train_op = t_opt.minimize(self.loss, global_step=global_step)
+
+        grad_var_list = t_opt.compute_gradients(self.loss)
+        
+        grad_list, _ = tf.clip_by_global_norm([x[0] for x in grad_var_list]\
+            , FLAGS.max_gradient_norm)
+        grad_var_list = [(grad, pair[1]) for grad ,pair in zip(grad_list, grad_var_list)]
+        self.grad_norm = tf.global_norm([x[0] for x in grad_var_list])
+        self.train_op = t_opt.apply_gradients(grad_var_list, global_step=global_step)
+
+        # self.train_op = t_opt.minimize(self.loss, global_step=global_step)
         
 
     def setup_system(self, encoder, decoder):
@@ -314,7 +326,7 @@ class QASystem(object):
         # fill in this feed_dictionary like:
         # input_feed['train_x'] = train_x
 
-        output_feed = [self.train_op, self.loss]
+        output_feed = [self.train_op, self.grad_norm, self.loss]
 
         outputs = session.run(output_feed, input_feed)
 
@@ -544,11 +556,10 @@ class QASystem(object):
                 context_mask_batch = contextMask[j*batch_size:(j+1)*batch_size]
                 question_len_batch = questionLen[j*batch_size:(j+1)*batch_size]
                 context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
-                print(context_len_batch)
-                x, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
+                # print(context_len_batch)
+                _, grad_norm, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
                     question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
-                print("[Sample] loss_out: %.8f " % (loss_out))
-                print(x)
+                print("[Sample] loss_out: %.8f , norm: %.8f" % (loss_out, grad_norm))
                 i += 1
                 toc=time.time()
                 print("time")
