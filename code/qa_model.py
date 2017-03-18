@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import time
 import logging
+import os
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -523,12 +524,13 @@ class QASystem(object):
         # so that you can use your trained model to make predictions, or
         # even continue training
         checkpoint_dir = FLAGS.train_dir
-        self.load(session, checkpoint_dir)
-        self.saver.save(self.sess, os.path.join(checkpoint_dir, model_name),global_step=itr)
-        model_name = "match_lstm.model-epoch"
+	model_name = "match_lstm.model-epoch"
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
+        self.load(session, checkpoint_dir)
+        #self.saver.save(session, os.path.join(checkpoint_dir, model_name),global_step=0)
+        
 
 
         question = dataset['question']
