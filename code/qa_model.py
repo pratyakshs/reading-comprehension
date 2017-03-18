@@ -5,6 +5,7 @@ from __future__ import print_function
 import time
 import logging
 import os
+import sys
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -215,7 +216,7 @@ class QASystem(object):
         :param args: pass in more arguments as needed
         """
         #==========Config Variables========#
-        self.lr = FLAGS.learning_rate
+        self.lr = tf.placeholder(tf.float32)#FLAGS.learning_rate
         self.max_para = FLAGS.para_size
         self.max_ques = FLAGS.question_size
 
@@ -242,7 +243,8 @@ class QASystem(object):
         # ==== set up training/updating procedure ====
         # pass
         global_step = tf.Variable(0, trainable=False)
-        learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
+        #learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
+        learning_rate = self.lr
         t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
 
         grad_var_list = t_opt.compute_gradients(self.loss)
@@ -267,8 +269,8 @@ class QASystem(object):
         , self.question_mask, self.question_len, self.paragraph_len)
         self.start_token_score, self.end_token_score = decoder.decode(knowledge_rep,\
             self.paragraph_mask)
-        self.start_token_score = tf.Print(self.start_token_score, [self.start_token_score], "scoreS")
-        self.end_token_score = tf.Print(self.end_token_score, [self.end_token_score], "scoreE")
+        #self.start_token_score = tf.Print(self.start_token_score, [self.start_token_score], "scoreS")
+        #self.end_token_score = tf.Print(self.end_token_score, [self.end_token_score], "scoreE")
         # raise NotImplementedError("Connect all parts of your system here!")
 
 
@@ -308,17 +310,19 @@ class QASystem(object):
         Loads distributed word representations based on placeholder tokens
         :return:
         """
+        print(bool(FLAGS.trainable))
         with vs.variable_scope("embeddings"):
-            para_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=False)
+            para_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=bool(FLAGS.trainable))
             para_embeddings = tf.nn.embedding_lookup(para_embedding_list, self.paragraph)
             self.para_embeddings = tf.reshape(para_embeddings, (-1, self.max_para, self.vocab_dim))
-            ques_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=False)
+            ques_embedding_list = tf.Variable(self.pretrained_embeddings, dtype=tf.float32, trainable=bool(FLAGS.trainable))
             ques_embeddings = tf.nn.embedding_lookup(ques_embedding_list, self.question)
             self.ques_embeddings = tf.reshape(ques_embeddings, (-1, self.max_ques, self.vocab_dim))
             # pass
 
     def optimize(self, session, question, paragraph, start, end, 
-        question_mask, question_len, paragraph_mask, paragraph_len):
+        question_mask, question_len, paragraph_mask, paragraph_len,
+        learn_rate):
         """
         Takes in actual data to optimize your model
         This method is equivalent to a step() function
@@ -331,7 +335,8 @@ class QASystem(object):
         self.question_len: question_len,
         self.paragraph_mask: paragraph_mask,
         self.question_mask: question_mask,
-        self.paragraph_len: paragraph_len}
+        self.paragraph_len: paragraph_len,
+        self.lr: learn_rate}
 
         # fill in this feed_dictionary like:
         # input_feed['train_x'] = train_x
@@ -575,17 +580,19 @@ class QASystem(object):
         batch_size = FLAGS.batch_size
         num_examples = len(question)
         num_batches = int(num_examples / batch_size) + 1
-        
+        lr = FLAGS.learning_rate
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         itr2 = 0
-        i = 0
+        i = 1
         min_val = 10000000000000000
         min_model_name="dummy"
         for itr in range(FLAGS.epochs):
+            if itr == 1 or itr == 2:
+                lr = lr/10.0
             for j in range(num_batches):
                 tic =time.time()
                 print('iter,', itr, 'j=', j)
@@ -599,12 +606,13 @@ class QASystem(object):
                 context_len_batch = contextLen[j*batch_size:(j+1)*batch_size]
                 # print(context_len_batch)
                 _, grad_norm, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
-                    question_mask_batch, question_len_batch, context_mask_batch, context_len_batch)
+                    question_mask_batch, question_len_batch, context_mask_batch, context_len_batch, lr)
                 print("[Sample] loss_out: %.8f , norm: %.8f" % (loss_out, grad_norm))
 
                 toc=time.time()
                 print("time")
                 print(toc-tic)
+                sys.stdout.flush()
                 if i % FLAGS.print_every == 0:
                     model_name = "test_match.model-epoch"
                     self.saver.save(session, os.path.join(checkpoint_dir, model_name), global_step=itr2)

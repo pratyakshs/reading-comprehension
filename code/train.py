@@ -15,7 +15,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 1, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 80, "Batch size to use during training.")
@@ -35,6 +35,7 @@ tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embeddin
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
 # tf.app.flags.DEFINE_string("checkpoint_dir", "match_gru", "Directory to save match_gru (def: match_gru)")
+tf.app.flags.DEFINE_integer("trainable", 1, "training embed?")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -161,10 +162,11 @@ def main(_):
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    # gpu_options = tf.GPUOptions(allow_growth=True)
+    gpu_options = tf.GPUOptions(allow_growth=True)
     #config=tf.ConfigProto(gpu_options=gpu_options\
     #  , allow_soft_placement=True)
-    with tf.Session() as sess:
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options\
+      , allow_soft_placement=True)) as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
 
