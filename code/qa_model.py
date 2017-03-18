@@ -592,7 +592,7 @@ class QASystem(object):
         min_model_name="dummy"
         for itr in range(FLAGS.epochs):
             if itr == 1 or itr == 2:
-                lr = lr/10.0
+                lr = lr * 0.9
             for j in range(num_batches):
                 tic =time.time()
                 print('iter,', itr, 'j=', j)
