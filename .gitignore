@@ -105,3 +105,6 @@ log/*
 *.png
 *.jpg
 
+# outputs/inputs
+*.json
+

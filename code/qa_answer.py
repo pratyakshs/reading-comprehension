@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.INFO)
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
@@ -38,6 +39,8 @@ tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_string("dev_path", "data/squad/dev-v1.1.json", "Path to the JSON dev set to evaluate against (default: ./data/squad/dev-v1.1.json)")
+tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
+tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
 
 def initialize_model(session, model, train_dir):
     ckpt = tf.train.get_checkpoint_state(train_dir)
@@ -130,7 +133,32 @@ def generate_answers(sess, model, dataset, rev_vocab):
     :return:
     """
     answers = {}
-
+    context_dataset, query_dataset, question_uuid_dataset = dataset
+    print(len(context_dataset))
+    for i in range(len(context_dataset)):
+        context_data = context_dataset[i]
+        query_data = query_dataset[i]
+        context_data = context_data.split()
+        context_len = len(context_data)
+        context_mask = [True] * len(context_data)
+        if context_len < FLAGS.para_size:
+            context_data = context_data + [0] * (FLAGS.para_size - context_len)
+            context_mask = context_mask + [False] * (FLAGS.para_size - context_len)
+        
+        query_data = query_data.split()
+        query_len = len(query_data)
+        query_mask = [True] * query_len
+        if query_len < FLAGS.para_size:
+            query_data = query_data + [0] * (FLAGS.question_size - query_len)
+            query_mask = query_mask + [False] * (FLAGS.question_size - query_len)
+        item = {'context': context_data, 'question': query_data,
+                'contextMask': context_mask, 'questionMask': query_mask,
+                'contextLen': context_len, 'questionLen': query_len}
+        s, e = model.answer(sess, item)
+        print('s,e=', s, e)
+        print('ansid', context_data[s[0]:e[0]+1])
+        answer = ' '.join([rev_vocab[int(idx)] for idx in context_data[s[0]:e[0]+1]])
+        answers[question_uuid_dataset[i]] = answer
     return answers
 
 
@@ -177,9 +205,9 @@ def main(_):
     # You must change the following code to adjust to your model
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
-    decoder = Decoder(output_size=FLAGS.output_size)
+    decoder = Decoder(output_size=FLAGS.output_size, size=FLAGS.state_size)
 
-    qa = QASystem(encoder, decoder)
+    qa = QASystem(encoder, decoder, embed_path)
 
     with tf.Session() as sess:
         train_dir = get_normalized_train_dir(FLAGS.train_dir)
