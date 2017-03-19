@@ -329,8 +329,11 @@ class Decoder(object):
                     s = tf.reshape(tf.argmax(alpha, 0), [batch_size])
                     # print('s shape', s.get_shape())
                     # update start guess
-                    fn = lambda idx: self._select(knowledge_rep, s, idx)
-                    u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+                    # fn = lambda idx: self._select(knowledge_rep, s, idx)
+                    s_sel = tf.tile(tf.reshape(tf.one_hot(s, FLAGS.para_size+1, dtype=tf.float32)\
+                        ,[batch_size, FLAGS.para_size+1,1]), [1, 1, 2*hidden_size])
+                    u_s = tf.reduce_sum(tf.multiply(knowledge_rep, s_sel), axis=1)
+                    # u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
                     # print('u_s shape', u_s.get_shape())
                 with tf.variable_scope('highway_beta'):
                     # compute end position next
@@ -338,8 +341,11 @@ class Decoder(object):
                     beta = tf.map_fn(lambda u_t: fn(u_t), U, dtype=tf.float32, parallel_iterations=100)
                     e = tf.reshape(tf.argmax(beta, 0), [batch_size])
                     # update end guess
-                    fn = lambda idx: self._select(knowledge_rep, e, idx)
-                    u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+                    e_sel = tf.tile(tf.reshape(tf.one_hot(e, FLAGS.para_size+1, dtype=tf.float32)\
+                        ,[batch_size, FLAGS.para_size+1,1]), [1, 1, 2*hidden_size])
+                    u_e = tf.reduce_sum(tf.multiply(knowledge_rep, e_sel), axis=1)
+                    # fn = lambda idx: self._select(knowledge_rep, e, idx)
+                    # u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
 
                 self._s.append(s)
                 self._e.append(e)
