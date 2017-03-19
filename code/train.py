@@ -36,6 +36,7 @@ tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
 # tf.app.flags.DEFINE_string("checkpoint_dir", "match_gru", "Directory to save match_gru (def: match_gru)")
 tf.app.flags.DEFINE_integer("trainable", 0, "training embed?")
+tf.app.flags.DEFINE_integer("current_ep", 0, "current_ep")
 
 
 FLAGS = tf.app.flags.FLAGS

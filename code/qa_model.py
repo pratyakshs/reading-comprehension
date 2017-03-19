@@ -105,8 +105,11 @@ class Encoder(object):
                   [-1,int(Hq.get_shape()[2])]), self.w) + self.b
             # print("mid checkk")
             # print(mid_st.get_shape())
-            mid_st=tf.multiply(tf.to_float(mask), tf.exp(tf.reshape(mid_st, [-1, int(Hq.get_shape()[1])])))
-            mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
+            mask_e = tf.log(tf.to_float(mask))
+            mid_st=tf.nn.softmax(mask_e+tf.reshape(mid_st, [-1, int(Hq.get_shape()[1])]))
+
+            # mid_st=tf.multiply(tf.to_float(mask), tf.exp(tf.reshape(mid_st, [-1, int(Hq.get_shape()[1])])))
+            # mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
             # tf.nn.softmax(tf.matmul(mid_st, self.w) + self.b)
             mid_st = tf.reshape(tf.batch_matmul(tf.reshape(mid_st,\
             [-1, 1,int(Hq.get_shape()[1])]), Hq),\
@@ -179,10 +182,12 @@ class Decoder(object):
             self.start_logits = tf.reshape(tf.matmul(tf.nn.tanh(\
             temp + ba), v) + c, [-1, int(Hq.get_shape()[1])])
             # print(self.start_logits.get_shape())
-            mid_st=tf.multiply(tf.to_float(mask), tf.exp(self.start_logits))
-            mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
-            attention_mat = tf.batch_matmul(tf.reshape(tf.nn.softmax(\
-            mid_st),[-1, 1, int(Hq.get_shape()[1])]), Hq)
+            mask_e = tf.log(tf.to_float(mask))
+            mid_st=tf.nn.softmax(mask_e+self.start_logits)
+            # mid_st=tf.multiply(tf.to_float(mask), tf.exp(self.start_logits))
+            # mid_st=mid_st/tf.reduce_sum(mid_st, axis=1, keep_dims=True)
+            attention_mat = tf.batch_matmul(tf.reshape(
+            mid_st,[-1, 1, int(Hq.get_shape()[1])]), Hq)
             # print(attention_mat.get_shape())
         with tf.variable_scope("attn_func_decode_end", \
             initializer=tf.contrib.layers.xavier_initializer()):
@@ -587,13 +592,13 @@ class QASystem(object):
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
         logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
-        itr2 = 0
+        itr2 = FLAGS.current_ep
         i = 1
         min_val = 10000000000000000
         min_model_name="dummy"
         for itr in range(FLAGS.epochs):
             if itr == 1 or itr == 2:
-                lr = lr * 0.9
+                lr = lr * 0.5
             for j in range(num_batches):
                 tic =time.time()
                 print('iter,', itr, 'j=', j)
