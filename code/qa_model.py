@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import time
 import logging
+import sys
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -58,6 +59,7 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     raise ValueError("`args` must be a 3D Tensor")
 
   shape = args.get_shape()
+  # d1 = shape[0].value
   m = shape[1].value
   n = shape[2].value
   dtype = args.dtype
@@ -68,8 +70,10 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     w_name = "weights_"
     if name is not None: w_name += name
     weights = vs.get_variable(
-        w_name, [output_size, m], dtype=dtype)
-    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
+        w_name, [1, output_size, m], dtype=dtype)
+
+    res = tf.batch_matmul(tf.tile(weights, [tf.shape(args)[0], 1, 1]), args)
+    # res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
     if not bias:
       return res
     with vs.variable_scope(outer_scope) as inner_scope:
@@ -77,10 +81,12 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
       if name is not None: b_name += name
       inner_scope.set_partitioner(None)
       biases = vs.get_variable(
-          b_name, [output_size, n],
+          b_name, [1, output_size, n],
           dtype=dtype,
           initializer=init_ops.constant_initializer(bias_start, dtype=dtype))
-  return tf.map_fn(lambda x: math_ops.add(x, biases), res, parallel_iterations=100)
+  res = tf.tile(biases, [tf.shape(res)[0], 1, 1]) + res
+  return res
+  # return tf.map_fn(lambda x: math_ops.add(x, biases), res, parallel_iterations=100)
 
 
 class Encoder(object):
