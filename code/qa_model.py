@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import time
 import logging
-import sys
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -59,7 +58,6 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     raise ValueError("`args` must be a 3D Tensor")
 
   shape = args.get_shape()
-  # d1 = shape[0].value
   m = shape[1].value
   n = shape[2].value
   dtype = args.dtype
@@ -70,10 +68,8 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     w_name = "weights_"
     if name is not None: w_name += name
     weights = vs.get_variable(
-        w_name, [1, output_size, m], dtype=dtype)
-
-    res = tf.batch_matmul(tf.tile(weights, [tf.shape(args)[0], 1, 1]), args)
-    # res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
+        w_name, [output_size, m], dtype=dtype)
+    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
     if not bias:
       return res
     with vs.variable_scope(outer_scope) as inner_scope:
@@ -81,12 +77,10 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
       if name is not None: b_name += name
       inner_scope.set_partitioner(None)
       biases = vs.get_variable(
-          b_name, [1, output_size, n],
+          b_name, [output_size, n],
           dtype=dtype,
           initializer=init_ops.constant_initializer(bias_start, dtype=dtype))
-  res = tf.tile(biases, [tf.shape(res)[0], 1, 1]) + res
-  return res
-  # return tf.map_fn(lambda x: math_ops.add(x, biases), res, parallel_iterations=100)
+  return tf.map_fn(lambda x: math_ops.add(x, biases), res, parallel_iterations=100)
 
 
 class Encoder(object):
@@ -293,18 +287,27 @@ class Decoder(object):
             # print('loop_until dim', loop_until.get_shape())
             # print('loop_until:', loop_until)
             # initial estimated positions
-            s, e = tf.split(0, 2, np.array([[0, 1] * batch_size]).T)
-            s = tf.Print(s, [s, s.get_shape()], 's = ')
-            e = tf.Print(e, [e, e.get_shape()], 'e = ')
+            # tf.one_hot([0], FLAGS.para_size+1, dtype=tf.float32)
+            # tf.reshape(tf.one_hot([0], FLAGS.para_size+1, dtype=tf.float32)\
+            #     [1,FLAGS.para_size+1,1])
+            zer_sel = tf.tile(tf.reshape(tf.one_hot([0], FLAGS.para_size+1, dtype=tf.float32)\
+                ,[1,FLAGS.para_size+1,1]), [batch_size, 1, 2*hidden_size])
+            one_sel = tf.tile(tf.reshape(tf.one_hot([1], FLAGS.para_size+1, dtype=tf.float32)\
+                ,[1,FLAGS.para_size+1,1]), [batch_size, 1, 2*hidden_size])
+            # s, e = tf.split(0, 2, np.array([[0, 1] * batch_size]).T)
+            # s = tf.Print(s, [s, s.get_shape()], 's = ')
+            # e = tf.Print(e, [e, e.get_shape()], 'e = ')
             # print('s = ', s)
-            fn = lambda idx: self._select(knowledge_rep, s, idx)
+            u_s = tf.reduce_sum(tf.multiply(knowledge_rep, zer_sel), axis=1)
+            u_e = tf.reduce_sum(tf.multiply(knowledge_rep, one_sel), axis=1)
+            # fn = lambda idx: self._select(knowledge_rep, s, idx)
         #     u_idx = tf.gather(u, idx)
         # pos_idx = tf.gather(pos, idx)
         # return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
-            u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+            # u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
             # print('u_s shape', u_s.get_shape())
-            fn = lambda idx: self._select(knowledge_rep, e, idx)
-            u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
+            # fn = lambda idx: self._select(knowledge_rep, e, idx)
+            # u_e = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
             # print('u_e shape', u_e.get_shape())
 
         self._s, self._e = [], []
