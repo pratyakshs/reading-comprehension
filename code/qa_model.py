@@ -103,18 +103,24 @@ class Encoder(object):
             para, _ = tf.nn.dynamic_rnn(lstm_enc, paragraph, dtype=tf.float32)
             # para_print = tf.Print(para, [para], 'yoooooo')
             # append sentinel
-            fn = lambda x: tf.concat(
-                0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
-            para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32, parallel_iterations=100)
+            # fn = lambda x: tf.concat(
+            #     0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
+            zero_vec = tf.tile(tf.zeros([1, 1, self.size], dtype=tf.float32), \
+                tf.pack([tf.shape(para)[0], 1, 1]))
+            para_encoding = tf.concat(1, [para, zero_vec])
+            # para_encoding = tf.map_fn(lambda x: fn(x), para, dtype=tf.float32, parallel_iterations=100)
             r, s, t = para_encoding.get_shape()
             # tf.assert_equal([s.value, t.value], [FLAGS.para_size+1, self.size])
 
         with tf.variable_scope('question_encoder'):
             ques, _ = tf.nn.dynamic_rnn(lstm_enc, question, dtype=tf.float32)
             # append sentinel
-            fn = lambda x: tf.concat(
-                0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
-            ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32, parallel_iterations=100)
+            # fn = lambda x: tf.concat(
+            #     0, [x, tf.zeros([1, self.size], dtype=tf.float32)])
+            zero_vec = tf.tile(tf.zeros([1, 1, self.size], dtype=tf.float32), \
+                tf.pack([tf.shape(ques)[0], 1, 1]))
+            # ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32, parallel_iterations=100)
+            ques_encoding = tf.concat(1, [ques, zero_vec])
             ques_encoding = tf.tanh(batch_linear(ques_encoding, FLAGS.question_size+1, True))
             ques_variation = tf.transpose(ques_encoding, perm=[0, 2, 1])
             r, s, t = ques_variation.get_shape()
@@ -126,9 +132,13 @@ class Encoder(object):
             # shape = (batch_size, question+1, context+1)
             L_t = tf.transpose(L, perm=[0, 2, 1])
             # normalize with respect to question
-            a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32, parallel_iterations=100)
+            a_q = tf.reshape(tf.nn.softmax(tf.reshape(L_t ,[-1, FLAGS.para_size+1]))\
+                , [-1, FLAGS.question_size+1, FLAGS.para_size+1])
+            # a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32, parallel_iterations=100)
             # normalize with respect to context
-            a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32, parallel_iterations=100)
+            a_c = tf.reshape(tf.nn.softmax(tf.reshape(L ,[-1, FLAGS.question_size+1]))\
+                , [-1, FLAGS.para_size+1, FLAGS.question_size+1])
+            # a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32, parallel_iterations=100)
             # summaries with respect to question, (batch_size, question+1, hidden_size)
             c_q = tf.batch_matmul(a_q, para_encoding)
             c_q_emb = tf.concat(1, [ques_variation, tf.transpose(c_q, perm=[0, 2 ,1])])
@@ -288,6 +298,9 @@ class Decoder(object):
             e = tf.Print(e, [e, e.get_shape()], 'e = ')
             # print('s = ', s)
             fn = lambda idx: self._select(knowledge_rep, s, idx)
+        #     u_idx = tf.gather(u, idx)
+        # pos_idx = tf.gather(pos, idx)
+        # return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
             u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
             # print('u_s shape', u_s.get_shape())
             fn = lambda idx: self._select(knowledge_rep, e, idx)
