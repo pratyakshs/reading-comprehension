@@ -609,7 +609,8 @@ class QASystem(object):
                 _, grad_norm, loss_out = self.optimize(session, question_batch, context_batch, start_batch, end_batch,\
                     question_mask_batch, question_len_batch, context_mask_batch, context_len_batch, lr)
                 print("[Sample] loss_out: %.8f , norm: %.8f" % (loss_out, grad_norm))
-
+		nrm = tf.global_norm(params).eval()
+		print("norm of weights", nrm)
                 toc=time.time()
                 print("time")
                 print(toc-tic)
