@@ -69,7 +69,7 @@ def batch_linear(args, output_size, bias, bias_start=0.0, scope=None, name=None)
     if name is not None: w_name += name
     weights = vs.get_variable(
         w_name, [output_size, m], dtype=dtype)
-    # res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
+    res = tf.map_fn(lambda x: math_ops.matmul(weights, x), args, parallel_iterations=100)
     if not bias:
       return res
     with vs.variable_scope(outer_scope) as inner_scope:
@@ -114,7 +114,7 @@ class Encoder(object):
             zero_vec = tf.tile(tf.zeros([1, 1, self.size], dtype=tf.float32), \
                 tf.pack([tf.shape(ques)[0], 1, 1]))
             # ques_encoding = tf.map_fn(lambda x: fn(x), ques, dtype=tf.float32, parallel_iterations=100)
-            para_encoding = tf.concat(1, [ques, zero_vec])
+            ques_encoding = tf.concat(1, [ques, zero_vec])
             ques_encoding = tf.tanh(batch_linear(ques_encoding, FLAGS.question_size+1, True))
             ques_variation = tf.transpose(ques_encoding, perm=[0, 2, 1])
             r, s, t = ques_variation.get_shape()
@@ -131,7 +131,7 @@ class Encoder(object):
             # a_q = tf.map_fn(lambda x: tf.nn.softmax(x), L_t, dtype=tf.float32, parallel_iterations=100)
             # normalize with respect to context
             a_c = tf.reshape(tf.nn.softmax(tf.reshape(L ,[-1, FLAGS.question_size+1]))\
-                , [-1, FLAGS.question_size+1, FLAGS.para_size+1])
+                , [-1, FLAGS.para_size+1, FLAGS.question_size+1])
             # a_c = tf.map_fn(lambda x: tf.nn.softmax(x), L, dtype=tf.float32, parallel_iterations=100)
             # summaries with respect to question, (batch_size, question+1, hidden_size)
             c_q = tf.batch_matmul(a_q, para_encoding)
@@ -292,6 +292,9 @@ class Decoder(object):
             e = tf.Print(e, [e, e.get_shape()], 'e = ')
             # print('s = ', s)
             fn = lambda idx: self._select(knowledge_rep, s, idx)
+        #     u_idx = tf.gather(u, idx)
+        # pos_idx = tf.gather(pos, idx)
+        # return tf.reshape(tf.gather(u_idx, pos_idx), [-1])
             u_s = tf.map_fn(lambda idx: fn(idx), loop_until, dtype=tf.float32, parallel_iterations=100)
             # print('u_s shape', u_s.get_shape())
             fn = lambda idx: self._select(knowledge_rep, e, idx)
