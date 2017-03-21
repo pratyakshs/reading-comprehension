@@ -41,6 +41,9 @@ tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embeddin
 tf.app.flags.DEFINE_string("dev_path", "data/squad/dev-v1.1.json", "Path to the JSON dev set to evaluate against (default: ./data/squad/dev-v1.1.json)")
 tf.app.flags.DEFINE_integer("question_size", 60, "Size of q (default 60)")
 tf.app.flags.DEFINE_integer("para_size", 800, "The para size (def 800)")
+tf.app.flags.DEFINE_integer("trainable", 0, "training embed?")
+tf.app.flags.DEFINE_integer("current_ep", 0, "current_ep")
+
 
 def initialize_model(session, model, train_dir):
     ckpt = tf.train.get_checkpoint_state(train_dir)
@@ -141,6 +144,7 @@ def generate_answers(sess, model, dataset, rev_vocab):
         context_data = context_data.split()
         context_len = len(context_data)
         context_mask = [True] * len(context_data)
+        context =  ' '.join([rev_vocab[int(idx)] for idx in context_data])
         if context_len < FLAGS.para_size:
             context_data = context_data + [0] * (FLAGS.para_size - context_len)
             context_mask = context_mask + [False] * (FLAGS.para_size - context_len)
@@ -148,6 +152,7 @@ def generate_answers(sess, model, dataset, rev_vocab):
         query_data = query_data.split()
         query_len = len(query_data)
         query_mask = [True] * query_len
+        question =  ' '.join([rev_vocab[int(idx)] for idx in query_data])
         if query_len < FLAGS.para_size:
             query_data = query_data + [0] * (FLAGS.question_size - query_len)
             query_mask = query_mask + [False] * (FLAGS.question_size - query_len)
@@ -155,9 +160,13 @@ def generate_answers(sess, model, dataset, rev_vocab):
                 'contextMask': context_mask, 'questionMask': query_mask,
                 'contextLen': context_len, 'questionLen': query_len}
         s, e = model.answer(sess, item)
-        print('s,e=', s, e)
-        print('ansid', context_data[s[0]:e[0]+1])
+#        print('s,e=', s, e)
+#        print('ansid', context_data[s[0]:e[0]+1])
         answer = ' '.join([rev_vocab[int(idx)] for idx in context_data[s[0]:e[0]+1]])
+
+	print('context=', context)
+	print('question=', question)
+	print('answer=', answer)
         answers[question_uuid_dataset[i]] = answer
     return answers
 
