@@ -251,6 +251,7 @@ class QASystem(object):
         #learning_rate = tf.train.exponential_decay(self.lr, global_step, 100000, 0.96)
         learning_rate = self.lr
         t_opt=tf.train.AdamOptimizer(learning_rate=learning_rate)
+        t_opt=tf.train.AdadeltaOptimizer(learning_rate=learning_rate)
 
         grad_var_list = t_opt.compute_gradients(self.loss)
         
@@ -518,23 +519,49 @@ class QASystem(object):
 
         return f1, em
 
+    def optimistic_restore(self, session, save_file):
+        session.run(tf.global_variables_initializer())
+        reader = tf.train.NewCheckpointReader(save_file)
+        saved_shapes = reader.get_variable_to_shape_map()
+        # for var in tf.global_variables():
+        #     print(var.name)
+        var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+                if 'Adadelta' not in var.name])
+        restore_vars = []
+        name2var = dict(zip(map(lambda x:x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
+        with tf.variable_scope('', reuse=True):
+            for var_name, saved_var_name in var_names:
+                curr_var = name2var[saved_var_name]
+                var_shape = curr_var.get_shape().as_list()
+                if var_shape == saved_shapes[saved_var_name]:
+                #     print(curr_var.name)
+                #     if 'delta' in curr_var.name:
+                #         # print('yohoooo' + curr_var)
+                #         continue
+                    restore_vars.append(curr_var)
+        saver = tf.train.Saver(restore_vars)
+        saver.restore(session, save_file)
+
+
     def load(self, session, checkpoint_dir):
         print(" [*] Reading checkpoints...")
 
-        model_name = "match_lstm.model-epoch"
+        model_name = "coatt_lstm.model-epoch"
         # model_dir = "squad_%s" % (FLAGS.batch_size)
         # checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-            self.saver.restore(session, os.path.join(checkpoint_dir, ckpt_name))
+            self.optimistic_restore(session, os.path.join(checkpoint_dir, ckpt_name))
+            # self.saver.restore(session, os.path.join(checkpoint_dir, ckpt_name))
             print(" [*] Success to read {}".format(ckpt_name))
             return True
         else:
             print(" [*] Failed to find a checkpoint")
             return False
 
+    
     def train(self, session, dataset, datasetVal, rev_vocab, train_dir):
         """
         Implement main training loop
